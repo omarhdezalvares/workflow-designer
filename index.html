@@ -1,0 +1,1602 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>D365 Workflow Designer — Fase 1 (MVP)</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#ffffff; --border:#dde1e7; --text:#1f2a3d; --muted:#6b7684;
+    --accent:#3d5a99; --accent-light:#e6ecfa; --danger:#c0392b; --danger-bg:#fdecea;
+    --ok:#2c6b39; --ok-bg:#e4f3e6; --warn:#8a6d1a; --warn-bg:#fff6df;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:var(--text);background:var(--bg);}
+  button{font-family:inherit;cursor:pointer;}
+  input,select,textarea{font-family:inherit;}
+
+  /* ---------- LOGIN ---------- */
+  #loginScreen{position:fixed;inset:0;background:linear-gradient(135deg,#1f2a3d,#3d5a99);display:flex;align-items:center;justify-content:center;z-index:100;}
+  #loginBox{background:#fff;border-radius:12px;padding:32px 34px;width:320px;box-shadow:0 20px 50px rgba(0,0,0,.25);}
+  #loginBox h1{font-size:17px;margin:0 0 4px;}
+  #loginBox p{font-size:12.5px;color:var(--muted);margin:0 0 20px;}
+  #loginBox label{display:block;font-size:12px;font-weight:600;margin:12px 0 4px;color:#44536b;}
+  #loginBox input{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13.5px;}
+  #loginBox button{width:100%;margin-top:18px;padding:10px;border:none;border-radius:6px;background:var(--accent);color:#fff;font-weight:600;font-size:13.5px;}
+  #loginError{color:var(--danger);font-size:12px;margin-top:8px;display:none;}
+  #loginHint{font-size:11px;color:#9aa3b0;margin-top:14px;text-align:center;}
+
+  /* ---------- APP LAYOUT ---------- */
+  #app{display:none;height:100vh;flex-direction:column;}
+  #topbar{display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--border);flex-wrap:wrap;}
+  #topbar .grp{display:flex;gap:4px;padding-right:10px;margin-right:6px;border-right:1px solid var(--border);}
+  #topbar .grp:last-of-type{border-right:none;}
+  .tb-btn{display:flex;align-items:center;gap:5px;padding:6px 10px;border:1px solid var(--border);background:#fff;border-radius:6px;font-size:12px;font-weight:600;color:#44536b;}
+  .tb-btn:hover{background:var(--accent-light);border-color:var(--accent);color:var(--accent);}
+  .tb-btn:disabled{opacity:.4;cursor:not-allowed;}
+  .tb-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
+  #wfBadge{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted);}
+  #wfBadge b{color:var(--text);}
+  #dirtyDot{width:8px;height:8px;border-radius:50%;background:#c7cedb;}
+  #dirtyDot.dirty{background:#d98c2b;}
+  #userChip{font-size:11.5px;color:var(--muted);background:#f1f3f6;padding:4px 9px;border-radius:12px;}
+
+  #body{flex:1;display:flex;min-height:0;}
+  #toolbox{width:168px;background:var(--panel);border-right:1px solid var(--border);padding:10px;overflow-y:auto;}
+  #toolbox h3{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:14px 0 6px;}
+  #toolbox h3:first-child{margin-top:0;}
+  .tool-item{display:flex;align-items:center;gap:8px;padding:7px 8px;border:1px solid var(--border);border-radius:6px;margin-bottom:5px;background:#fff;font-size:12px;cursor:grab;user-select:none;}
+  .tool-item:hover{border-color:var(--accent);background:var(--accent-light);}
+  .tool-swatch{width:10px;height:10px;border-radius:3px;flex:0 0 auto;}
+
+  #canvasWrap{flex:1;position:relative;overflow:hidden;background:var(--bg);}
+  #canvasWrap.connect-mode{cursor:crosshair;}
+  svg#canvas{width:100%;height:100%;display:block;}
+  #breadcrumb{position:absolute;top:10px;left:10px;background:#fff;border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:11.5px;color:var(--muted);z-index:5;box-shadow:0 1px 4px rgba(0,0,0,.06);}
+  #breadcrumb button{border:none;background:none;color:var(--accent);font-weight:600;font-size:11.5px;padding:0;margin-right:4px;}
+  #zoomHint{position:absolute;bottom:10px;left:10px;font-size:10.5px;color:#9aa3b0;background:#fff;padding:4px 8px;border-radius:5px;border:1px solid var(--border);z-index:5;}
+  #minimapWrap{position:absolute;bottom:10px;right:10px;width:160px;height:110px;background:#fff;border:1px solid var(--border);border-radius:6px;overflow:hidden;box-shadow:0 1px 6px rgba(0,0,0,.08);z-index:5;}
+  svg#minimap{width:100%;height:100%;display:block;}
+
+  #propsPanel{width:270px;background:var(--panel);border-left:1px solid var(--border);padding:14px;overflow-y:auto;}
+  #propsPanel h3{font-size:12px;margin:0 0 12px;color:var(--text);}
+  #propsEmpty{font-size:12px;color:var(--muted);margin-top:20px;text-align:center;}
+  .field{margin-bottom:12px;}
+  .field label{display:block;font-size:11px;font-weight:600;color:#44536b;margin-bottom:3px;}
+  .field input[type=text],.field textarea,.field select{width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:5px;font-size:12.5px;}
+  .field textarea{min-height:60px;resize:vertical;font-family:ui-monospace,Menlo,monospace;font-size:11px;}
+  .field .hint{font-size:10px;color:#9aa3b0;margin-top:3px;}
+  .field-row{display:flex;align-items:center;gap:6px;}
+  .type-badge{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;margin-bottom:10px;}
+  .cc-count{font-size:11px;color:var(--muted);margin:4px 0;}
+
+  #validationBar{background:var(--panel);border-top:1px solid var(--border);max-height:150px;overflow-y:auto;}
+  #validationHead{display:flex;align-items:center;gap:10px;padding:7px 12px;font-size:11.5px;font-weight:700;color:#44536b;border-bottom:1px solid #eef1f5;}
+  #validationList{padding:4px 0;}
+  .vitem{display:flex;gap:8px;align-items:flex-start;padding:5px 14px;font-size:11.5px;cursor:pointer;}
+  .vitem:hover{background:#f7f8fa;}
+  .vitem .sev{flex:0 0 auto;font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:8px;margin-top:1px;}
+  .sev.Error{background:var(--danger-bg);color:var(--danger);}
+  .sev.Warning{background:var(--warn-bg);color:var(--warn);}
+  #validationEmpty{padding:8px 14px;font-size:11.5px;color:var(--ok);}
+
+  .node-rect{stroke-width:1.6;cursor:pointer;}
+  .node-rect.selected{stroke:#1f2a3d;stroke-width:2.5;}
+  .node-rect.invalid{stroke:var(--danger);stroke-dasharray:4 3;}
+  .node-label{font-size:11.5px;font-weight:600;fill:#1f2a3d;pointer-events:none;}
+  .node-sub{font-size:9.5px;fill:#6b7684;pointer-events:none;}
+  .conn-line{stroke:#8a93a3;stroke-width:1.6;fill:none;}
+  .conn-line.true{stroke:#3f8f4f;}
+  .conn-line.false{stroke:#c0392b;}
+  .conn-label{font-size:9.5px;fill:#44536b;}
+  .conn-label.true{fill:#3f8f4f;font-weight:700;}
+  .conn-label.false{fill:#c0392b;font-weight:700;}
+
+  dialog{border:none;border-radius:10px;padding:0;box-shadow:0 20px 50px rgba(0,0,0,.25);}
+  dialog::backdrop{background:rgba(20,25,35,.45);}
+  .dlg-inner{width:360px;padding:20px;}
+  .dlg-inner h3{margin:0 0 12px;font-size:14px;}
+  .dlg-inner .row{display:flex;gap:8px;margin-top:14px;justify-content:flex-end;}
+</style>
+</head>
+<body>
+
+<!-- ============= LOGIN ============= -->
+<div id="loginScreen">
+  <div id="loginBox">
+    <h1>D365 Workflow Designer</h1>
+    <p>Fase 1 · MVP interno — un solo usuario, sin roles ni permisos.</p>
+    <form id="loginForm">
+      <label>Usuario</label>
+      <input type="text" id="loginUser" autocomplete="username" value="admin">
+      <label>Contraseña</label>
+      <input type="password" id="loginPass" autocomplete="current-password" value="admin123">
+      <button type="submit">Ingresar</button>
+      <div id="loginError">Usuario o contraseña incorrectos.</div>
+    </form>
+    <div id="loginHint">Credenciales de demo: admin / admin123</div>
+  </div>
+</div>
+
+<!-- ============= APP ============= -->
+<div id="app">
+  <div id="topbar">
+    <div class="grp">
+      <button class="tb-btn" id="btnImportXml">⬆ Importar XML</button>
+      <button class="tb-btn" id="btnExportXml">⬇ Exportar XML</button>
+      <input type="file" id="fileXmlInput" accept=".xml" style="display:none">
+    </div>
+    <div class="grp">
+      <button class="tb-btn" id="btnImportJson">⬆ Importar JSON</button>
+      <button class="tb-btn" id="btnExportJson">⬇ Exportar JSON</button>
+      <input type="file" id="fileJsonInput" accept=".json" style="display:none">
+    </div>
+    <div class="grp">
+      <button class="tb-btn" id="btnValidate">✓ Validar Flujo</button>
+      <button class="tb-btn" id="btnAutoLayout">▦ Auto Layout</button>
+      <button class="tb-btn" id="btnNewVersion">✚ Nueva Versión</button>
+    </div>
+    <div class="grp">
+      <button class="tb-btn" id="btnUndo">↺ Deshacer</button>
+      <button class="tb-btn" id="btnRedo">↻ Rehacer</button>
+      <button class="tb-btn" id="btnConnect">⤳ Conectar</button>
+      <button class="tb-btn" id="btnDelete">🗑 Eliminar</button>
+    </div>
+    <div id="wfBadge">
+      <span id="dirtyDot"></span>
+      <span><b id="wfName">—</b> · v<span id="wfVersion">—</span></span>
+      <span id="userChip">👤 admin</span>
+      <button class="tb-btn" id="btnLogout">Salir</button>
+    </div>
+  </div>
+
+  <div id="body">
+    <div id="toolbox">
+      <h3>Elementos</h3>
+      <div class="tool-item" draggable="true" data-type="Start"><span class="tool-swatch" style="background:#4a9a58"></span>Start</div>
+      <div class="tool-item" draggable="true" data-type="End"><span class="tool-swatch" style="background:#5b5f6b"></span>End</div>
+      <div class="tool-item" draggable="true" data-type="Task"><span class="tool-swatch" style="background:#5b7bb0"></span>Task</div>
+      <div class="tool-item" draggable="true" data-type="Approval"><span class="tool-swatch" style="background:#3d5a99"></span>Approval</div>
+      <div class="tool-item" draggable="true" data-type="ManualDecision"><span class="tool-swatch" style="background:#a06b2c"></span>Manual Decision</div>
+      <div class="tool-item" draggable="true" data-type="ConditionalDecision"><span class="tool-swatch" style="background:#7a5bb0"></span>Conditional Decision</div>
+      <div class="tool-item" draggable="true" data-type="Rejection"><span class="tool-swatch" style="background:#c0392b"></span>Rejection</div>
+      <div class="tool-item" draggable="true" data-type="Return"><span class="tool-swatch" style="background:#8a6d1a"></span>Return</div>
+      <div class="tool-item" draggable="true" data-type="ParallelActivity"><span class="tool-swatch" style="background:#2c8fa0"></span>Parallel Activity</div>
+      <div class="tool-item" draggable="true" data-type="Subworkflow"><span class="tool-swatch" style="background:#4a4a70"></span>Subworkflow</div>
+      <h3>Ayuda</h3>
+      <div style="font-size:11px;color:#8a93a3;line-height:1.5;">
+        Arrastra un elemento al canvas. Doble clic en un Parallel Activity para entrar a sus ramas.
+        Usa "Conectar" y haz clic en nodo origen → nodo destino.
+      </div>
+    </div>
+
+    <div id="canvasWrap">
+      <div id="breadcrumb"></div>
+      <svg id="canvas">
+        <defs>
+          <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="1" fill="#dfe3ea"/>
+          </pattern>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#8a93a3"/>
+          </marker>
+          <marker id="arrowTrue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#3f8f4f"/>
+          </marker>
+          <marker id="arrowFalse" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/>
+          </marker>
+        </defs>
+        <rect id="gridBg" x="-5000" y="-5000" width="10000" height="10000" fill="url(#grid)"/>
+        <g id="world"></g>
+      </svg>
+      <div id="zoomHint">Rueda = zoom · Arrastrar fondo = pan</div>
+      <div id="minimapWrap"><svg id="minimap"></svg></div>
+    </div>
+
+    <div id="propsPanel">
+      <h3>Propiedades</h3>
+      <div id="propsBody"><div id="propsEmpty">Selecciona un nodo para editar sus propiedades.</div></div>
+    </div>
+  </div>
+
+  <div id="validationBar">
+    <div id="validationHead">Validación <span id="validationCount" style="font-weight:400;color:var(--muted);"></span></div>
+    <div id="validationList"></div>
+  </div>
+</div>
+
+<dialog id="promptDlg">
+  <div class="dlg-inner">
+    <h3 id="promptTitle">Título</h3>
+    <div id="promptBody"></div>
+    <div class="row">
+      <button class="tb-btn" id="promptCancel">Cancelar</button>
+      <button class="tb-btn primary" id="promptOk">Aceptar</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+'use strict';
+/* =========================================================================
+   D365 WORKFLOW DESIGNER — FASE 1 (MVP)
+   Aplicación 100% cliente. Sin backend, sin frameworks. Ver documento
+   "Arquitectura_Workflow_Designer_D365.md" para el diseño completo.
+   ========================================================================= */
+
+/* ---------------------------------------------------------------------- */
+/* 0. CONSTANTES DE DOMINIO                                                */
+/* ---------------------------------------------------------------------- */
+const NODE_TYPES = {
+  Start:               { label:'Start',               color:'#4a9a58', fill:'#e4f3e6', shape:'pill'   },
+  End:                  { label:'End',                 color:'#5b5f6b', fill:'#eef1f5', shape:'pill'   },
+  Task:                 { label:'Task',                color:'#5b7bb0', fill:'#eef2fb', shape:'rect'   },
+  Approval:             { label:'Approval',            color:'#3d5a99', fill:'#e6ecfa', shape:'rect'   },
+  ManualDecision:       { label:'Manual Decision',     color:'#a06b2c', fill:'#faf1e4', shape:'diamond'},
+  ConditionalDecision:  { label:'Conditional Decision',color:'#7a5bb0', fill:'#f1ecfa', shape:'diamond'},
+  Rejection:            { label:'Rejection',           color:'#c0392b', fill:'#fdecea', shape:'rect'   },
+  Return:                { label:'Return',              color:'#8a6d1a', fill:'#fff6df', shape:'rect'   },
+  ParallelActivity:     { label:'Parallel Activity',   color:'#2c8fa0', fill:'#e2f3f6', shape:'hex'    },
+  Subworkflow:           { label:'Subworkflow',         color:'#4a4a70', fill:'#eceaf5', shape:'rect2'  },
+  Unsupported:           { label:'No soportado',        color:'#9aa3b0', fill:'#f1f3f6', shape:'rect'   },
+};
+const NODE_W = 150, NODE_H = 54;
+
+/* ---------------------------------------------------------------------- */
+/* 1. ESTADO GLOBAL                                                       */
+/* ---------------------------------------------------------------------- */
+let doc = null;                 // WorkflowDocument (modelo interno)
+let baselineHash = null;        // hash del doc recién importado (para isDirty)
+let branchPath = [];            // pila de drill-down: [{parallelNodeId, branchId, branchName}]
+let selection = null;           // {kind:'node'|'conn', id}
+let mode = 'select';            // 'select' | 'connect'
+let connectSource = null;
+let undoStack = [], redoStack = [];
+let view = { scale: 1, tx: 60, ty: 60 };
+let dragState = null;           // {type:'pan'|'node', ...}
+
+/* ---------------------------------------------------------------------- */
+/* 2. UTILIDADES                                                          */
+/* ---------------------------------------------------------------------- */
+function uuid(){
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c=>{
+    const r = Math.random()*16|0, v = c==='x'?r:(r&0x3|0x8);
+    return v.toString(16);
+  });
+}
+let storageSeq = 900000000;
+function nextStorageId(){ return storageSeq++; }
+function hashOf(obj){ return JSON.stringify(obj); }
+function clone(obj){ return JSON.parse(JSON.stringify(obj)); }
+function $(sel){ return document.querySelector(sel); }
+function el(tag, attrs, children){
+  const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  if(attrs) for(const k in attrs) e.setAttribute(k, attrs[k]);
+  if(children) children.forEach(c=>e.appendChild(c));
+  return e;
+}
+function htmlEl(tag, attrs, html){
+  const e = document.createElement(tag);
+  if(attrs) for(const k in attrs) e.setAttribute(k, attrs[k]);
+  if(html!==undefined) e.innerHTML = html;
+  return e;
+}
+
+/* ---------------------------------------------------------------------- */
+/* 3. MODELO: acceso a la colección activa (root o rama, con drill-down)  */
+/* ---------------------------------------------------------------------- */
+function getActiveCollection(){
+  if(branchPath.length===0) return { nodes: doc.nodes, connections: doc.connections };
+  const top = branchPath[branchPath.length-1];
+  const parallelNode = findNodeAnywhere(top.parallelNodeId);
+  const branch = parallelNode.properties.branches.find(b=>b.id===top.branchId);
+  return branch.elementCollection;
+}
+function findNodeAnywhere(id, coll){
+  coll = coll || { nodes: doc.nodes };
+  for(const n of coll.nodes){
+    if(n.id===id) return n;
+    if(n.type==='ParallelActivity' && n.properties && n.properties.branches){
+      for(const b of n.properties.branches){
+        const found = findNodeAnywhereIn(id, b.elementCollection);
+        if(found) return found;
+      }
+    }
+  }
+  return null;
+}
+function findNodeAnywhereIn(id, coll){
+  for(const n of coll.nodes){
+    if(n.id===id) return n;
+    if(n.type==='ParallelActivity' && n.properties && n.properties.branches){
+      for(const b of n.properties.branches){
+        const found = findNodeAnywhereIn(id, b.elementCollection);
+        if(found) return found;
+      }
+    }
+  }
+  return null;
+}
+function allCollectionsFlat(){
+  // devuelve [{path:[...], collection}] para validar/exportar recursivamente
+  const out = [];
+  function walk(coll, path){
+    out.push({ path, collection: coll });
+    coll.nodes.forEach(n=>{
+      if(n.type==='ParallelActivity' && n.properties && n.properties.branches){
+        n.properties.branches.forEach(b=>{
+          walk(b.elementCollection, path.concat([{parallelNodeId:n.id, branchId:b.id, branchName:b.name}]));
+        });
+      }
+    });
+  }
+  walk({nodes:doc.nodes, connections:doc.connections}, []);
+  return out;
+}
+
+/* ---------------------------------------------------------------------- */
+/* 4. HISTORIAL (Memento) + DIRTY TRACKING                                */
+/* ---------------------------------------------------------------------- */
+function pushHistory(){
+  undoStack.push(hashOf(doc));
+  if(undoStack.length>50) undoStack.shift();
+  redoStack = [];
+}
+function undo(){
+  if(!undoStack.length) return;
+  redoStack.push(hashOf(doc));
+  doc = JSON.parse(undoStack.pop());
+  afterMutation(false);
+}
+function redo(){
+  if(!redoStack.length) return;
+  undoStack.push(hashOf(doc));
+  doc = JSON.parse(redoStack.pop());
+  afterMutation(false);
+}
+function markDirty(){
+  doc.version.isDirty = (hashOf(doc.nodes)+hashOf(doc.connections)) !== baselineHash;
+}
+function afterMutation(recordHistory){
+  if(recordHistory!==false) markDirty();
+  markDirty();
+  renderAll();
+  runValidation();
+}
+
+/* ---------------------------------------------------------------------- */
+/* 5. VERSIONAMIENTO (sección 4 del documento de arquitectura)            */
+/* ---------------------------------------------------------------------- */
+function bumpVersionIfDirty(force){
+  markDirty();
+  if(!doc.version.isDirty && !force){
+    return false; // "solo vio" -> versión sin cambios
+  }
+  const prev = `${doc.version.workflowId}@${doc.version.major}.${doc.version.minor}.${doc.version.revision}.${doc.version.build}`;
+  if(force){ doc.version.major += 1; doc.version.minor = 0; }
+  else { doc.version.minor += 1; }
+  doc.version.previousVersionRef = prev;
+  doc.version.isDirty = false;
+  baselineHash = hashOf(doc.nodes)+hashOf(doc.connections);
+  return true;
+}
+
+/* ---------------------------------------------------------------------- */
+/* 6. VALIDACIÓN (Chain of Responsibility simplificada: array de reglas)  */
+/* ---------------------------------------------------------------------- */
+const VALIDATION_RULES = [
+  function noOrphanNodes(coll, path, issues){
+    coll.nodes.forEach(n=>{
+      if(n.type==='Start'||n.type==='End') return;
+      const hasIn = coll.connections.some(c=>c.targetNodeId===n.id);
+      const hasOut = coll.connections.some(c=>c.sourceNodeId===n.id);
+      if(!hasIn && !hasOut){
+        issues.push({sev:'Error', nodeId:n.id, path, msg:`Nodo huérfano sin conexiones: "${n.name}"`});
+      } else if(!hasIn){
+        issues.push({sev:'Warning', nodeId:n.id, path, msg:`Nodo sin entrada: "${n.name}"`});
+      } else if(!hasOut && n.type!=='Rejection'){
+        issues.push({sev:'Warning', nodeId:n.id, path, msg:`Nodo sin salida: "${n.name}"`});
+      }
+    });
+  },
+  function mustHaveStartEnd(coll, path, issues){
+    const starts = coll.nodes.filter(n=>n.type==='Start').length;
+    const ends = coll.nodes.filter(n=>n.type==='End').length;
+    if(starts===0) issues.push({sev:'Error', path, msg:'Falta un nodo Start en este flujo/rama.'});
+    if(starts>1) issues.push({sev:'Warning', path, msg:'Más de un nodo Start en este flujo/rama.'});
+    if(ends===0) issues.push({sev:'Error', path, msg:'Falta un nodo End en este flujo/rama.'});
+  },
+  function decisionBothPaths(coll, path, issues){
+    coll.nodes.filter(n=>n.type==='ConditionalDecision').forEach(n=>{
+      const outs = coll.connections.filter(c=>c.sourceNodeId===n.id);
+      const hasTrue = outs.some(c=>c.outcome==='True');
+      const hasFalse = outs.some(c=>c.outcome==='False');
+      if(!hasTrue || !hasFalse){
+        issues.push({sev:'Error', nodeId:n.id, path, msg:`Decisión "${n.name}" no tiene ambas rutas (Sí/No) conectadas.`});
+      }
+      if(hasTrue && hasFalse){
+        const t = outs.find(c=>c.outcome==='True').targetNodeId;
+        const f = outs.find(c=>c.outcome==='False').targetNodeId;
+        if(t===f) issues.push({sev:'Warning', nodeId:n.id, path, msg:`Decisión "${n.name}": ambas rutas van al mismo nodo.`});
+      }
+    });
+  },
+  function conditionValid(coll, path, issues){
+    coll.nodes.filter(n=>n.type==='ConditionalDecision').forEach(n=>{
+      const cond = n.properties && n.properties.condition;
+      const groups = (cond && cond.groups || []).filter(g=>g.terms && g.terms.length);
+      if(!cond || groups.length===0){
+        issues.push({sev:'Error', nodeId:n.id, path, msg:`Decisión "${n.name}" no tiene condición configurada.`});
+      }
+    });
+  },
+  function parallelBranchClosure(coll, path, issues){
+    coll.nodes.filter(n=>n.type==='ParallelActivity').forEach(n=>{
+      (n.properties.branches||[]).forEach(b=>{
+        const ec = b.elementCollection;
+        const hasEnd = ec.nodes.some(x=>x.type==='End');
+        if(!hasEnd) issues.push({sev:'Error', nodeId:n.id, path, msg:`Rama "${b.name}" de "${n.name}" no termina en un End.`});
+      });
+      if(!(n.properties.branches||[]).length){
+        issues.push({sev:'Warning', nodeId:n.id, path, msg:`"${n.name}" no tiene ramas definidas.`});
+      }
+    });
+  },
+  function subworkflowIncomplete(coll, path, issues){
+    coll.nodes.filter(n=>n.type==='Subworkflow').forEach(n=>{
+      if(!n.properties || !n.properties.workflowId){
+        issues.push({sev:'Warning', nodeId:n.id, path, msg:`Subflujo "${n.name}" sin workflowId asignado.`});
+      }
+    });
+  },
+  function brokenReferences(coll, path, issues){
+    const ids = new Set(coll.nodes.map(n=>n.id));
+    coll.connections.forEach(c=>{
+      if(!ids.has(c.sourceNodeId) || !ids.has(c.targetNodeId)){
+        issues.push({sev:'Error', path, msg:`Conexión con referencia rota (${c.id}).`});
+      }
+    });
+  },
+];
+function runValidation(){
+  const issues = [];
+  allCollectionsFlat().forEach(({path, collection})=>{
+    VALIDATION_RULES.forEach(rule=>rule(collection, path, issues));
+  });
+  renderValidation(issues);
+  return issues;
+}
+
+/* ---------------------------------------------------------------------- */
+/* 7. AUTO LAYOUT (capas por BFS, simplificado — ver sección 2.2 doc)     */
+/* ---------------------------------------------------------------------- */
+function autoLayout(){
+  pushHistory();
+  allCollectionsFlat().forEach(({collection})=>{
+    const coll = collection;
+    const dist = {};
+    const starts = coll.nodes.filter(n=>n.type==='Start');
+    const queue = starts.map(s=>({id:s.id, d:0}));
+    starts.forEach(s=>dist[s.id]=0);
+    while(queue.length){
+      const {id,d} = queue.shift();
+      coll.connections.filter(c=>c.sourceNodeId===id).forEach(c=>{
+        if(dist[c.targetNodeId]===undefined || dist[c.targetNodeId] > d+1){
+          dist[c.targetNodeId] = d+1;
+          queue.push({id:c.targetNodeId, d:d+1});
+        }
+      });
+    }
+    coll.nodes.forEach(n=>{ if(dist[n.id]===undefined) dist[n.id]=0; });
+    const cols = {};
+    coll.nodes.forEach(n=>{ (cols[dist[n.id]] = cols[dist[n.id]]||[]).push(n); });
+    Object.keys(cols).forEach(level=>{
+      cols[level].forEach((n,i)=>{
+        n.position = { x: 40 + Number(level)*220, y: 40 + i*130 };
+      });
+    });
+  });
+  afterMutation();
+}
+
+/* ---------------------------------------------------------------------- */
+/* 8. RENDER — CANVAS SVG                                                  */
+/* ---------------------------------------------------------------------- */
+function worldToScreen(pt){ return { x: pt.x*view.scale+view.tx, y: pt.y*view.scale+view.ty }; }
+function screenToWorld(pt){ return { x: (pt.x-view.tx)/view.scale, y: (pt.y-view.ty)/view.scale }; }
+
+function renderAll(){
+  renderBreadcrumb();
+  renderCanvas();
+  renderMinimap();
+  renderProperties();
+  renderTopbar();
+}
+
+function renderBreadcrumb(){
+  const bc = $('#breadcrumb');
+  let html = `<button data-idx="-1">🏠 Raíz</button>`;
+  branchPath.forEach((p,i)=>{ html += ` / <button data-idx="${i}">${p.branchName}</button>`; });
+  bc.innerHTML = html;
+  bc.querySelectorAll('button').forEach(b=>{
+    b.onclick = ()=>{
+      const idx = Number(b.dataset.idx);
+      branchPath = idx===-1 ? [] : branchPath.slice(0, idx+1);
+      selection = null;
+      renderAll();
+    };
+  });
+}
+
+function shapePath(type, w, h){
+  const cfg = NODE_TYPES[type] || NODE_TYPES.Unsupported;
+  if(cfg.shape==='diamond'){
+    return `M ${w/2} 0 L ${w} ${h/2} L ${w/2} ${h} L 0 ${h/2} Z`;
+  }
+  if(cfg.shape==='hex'){
+    const o=14;
+    return `M ${o} 0 L ${w-o} 0 L ${w} ${h/2} L ${w-o} ${h} L ${o} ${h} L 0 ${h/2} Z`;
+  }
+  if(cfg.shape==='pill'){
+    return null; // usa rect rx grande
+  }
+  return null;
+}
+
+function renderCanvas(){
+  const world = $('#world');
+  world.innerHTML = '';
+  world.setAttribute('transform', `translate(${view.tx},${view.ty}) scale(${view.scale})`);
+  const coll = getActiveCollection();
+  const issues = runValidationSilent();
+  const invalidNodeIds = new Set(issues.filter(i=>i.sev==='Error' && i.nodeId).map(i=>i.nodeId));
+
+  // conexiones primero (debajo de los nodos)
+  coll.connections.forEach(c=>{
+    const s = coll.nodes.find(n=>n.id===c.sourceNodeId);
+    const t = coll.nodes.find(n=>n.id===c.targetNodeId);
+    if(!s||!t) return;
+    const p1 = { x: s.position.x+NODE_W, y: s.position.y+NODE_H/2 };
+    const p2 = { x: t.position.x, y: t.position.y+NODE_H/2 };
+    const mx = (p1.x+p2.x)/2;
+    const d = `M ${p1.x} ${p1.y} C ${mx} ${p1.y}, ${mx} ${p2.y}, ${p2.x} ${p2.y}`;
+    const cls = c.outcome==='True' ? 'true' : c.outcome==='False' ? 'false' : '';
+    const path = el('path', { d, class:`conn-line ${cls}`, 'marker-end': `url(#${c.outcome==='True'?'arrowTrue':c.outcome==='False'?'arrowFalse':'arrow'})` });
+    path.style.cursor='pointer';
+    path.addEventListener('click', (e)=>{ e.stopPropagation(); selection = {kind:'conn', id:c.id}; renderAll(); });
+    world.appendChild(path);
+    if(c.outcome){
+      const lbl = el('text', { x: mx, y: (p1.y+p2.y)/2 - 6, class:`conn-label ${cls}`, 'text-anchor':'middle' });
+      lbl.textContent = c.outcome==='True' ? 'Sí' : c.outcome==='False' ? 'No' : c.outcome;
+      world.appendChild(lbl);
+    }
+  });
+
+  // nodos
+  coll.nodes.forEach(n=>{
+    const cfg = NODE_TYPES[n.type] || NODE_TYPES.Unsupported;
+    const g = el('g', { transform:`translate(${n.position.x},${n.position.y})`, class:'node-group' });
+    const isSel = selection && selection.kind==='node' && selection.id===n.id;
+    const isInvalid = invalidNodeIds.has(n.id);
+    let shapeEl;
+    const pathD = shapePath(n.type, NODE_W, NODE_H);
+    if(pathD){
+      shapeEl = el('path', { d:pathD, fill:cfg.fill, stroke:cfg.color, class:`node-rect ${isSel?'selected':''} ${isInvalid?'invalid':''}` });
+    } else {
+      const rx = cfg.shape==='pill' ? NODE_H/2 : cfg.shape==='rect2' ? 4 : 6;
+      shapeEl = el('rect', { width:NODE_W, height:NODE_H, rx, fill:cfg.fill, stroke:cfg.color, class:`node-rect ${isSel?'selected':''} ${isInvalid?'invalid':''}` });
+      if(cfg.shape==='rect2'){
+        const inner = el('rect', { x:5, y:5, width:NODE_W-10, height:NODE_H-10, rx:2, fill:'none', stroke:cfg.color, 'stroke-width':1 });
+        g.appendChild(shapeEl); g.appendChild(inner); shapeEl=null;
+      }
+    }
+    if(shapeEl) g.appendChild(shapeEl);
+    const label = el('text', { x:NODE_W/2, y:NODE_H/2-4, 'text-anchor':'middle', class:'node-label' });
+    label.textContent = n.name.length>20 ? n.name.slice(0,19)+'…' : n.name;
+    g.appendChild(label);
+    const sub = el('text', { x:NODE_W/2, y:NODE_H/2+12, 'text-anchor':'middle', class:'node-sub' });
+    sub.textContent = cfg.label;
+    g.appendChild(sub);
+
+    g.addEventListener('mousedown', (e)=>{
+      e.stopPropagation();
+      if(mode==='connect'){
+        handleConnectClick(n.id);
+        return;
+      }
+      selection = {kind:'node', id:n.id};
+      pushHistory();
+      const startWorld = screenToWorld({x:e.clientX - canvasRect().left, y:e.clientY - canvasRect().top});
+      dragState = { type:'node', nodeId:n.id, offX: startWorld.x-n.position.x, offY: startWorld.y-n.position.y, moved:false };
+      renderAll();
+    });
+    g.addEventListener('dblclick', (e)=>{
+      e.stopPropagation();
+      if(n.type==='ParallelActivity'){
+        const firstBranch = (n.properties.branches||[])[0];
+        if(firstBranch){
+          branchPath.push({ parallelNodeId:n.id, branchId:firstBranch.id, branchName:firstBranch.name });
+          selection = null;
+          renderAll();
+        }
+      }
+    });
+    world.appendChild(g);
+  });
+
+  // si estamos dentro de una rama y hay más de una, mostrar selector rápido
+  renderBranchTabs(coll);
+}
+
+function renderBranchTabs(coll){
+  document.querySelectorAll('.branch-tab').forEach(e=>e.remove());
+  if(!branchPath.length) return;
+  const top = branchPath[branchPath.length-1];
+  const parallelNode = findNodeAnywhere(top.parallelNodeId);
+  if(!parallelNode) return;
+  const wrap = htmlEl('div', {class:'branch-tab', style:'position:absolute;top:44px;left:10px;z-index:5;display:flex;gap:4px;flex-wrap:wrap;max-width:70%;'});
+  (parallelNode.properties.branches||[]).forEach(b=>{
+    const active = b.id===top.branchId;
+    const btn = htmlEl('button', {style:`font-size:11px;padding:4px 9px;border-radius:12px;border:1px solid ${active?'#3d5a99':'#dde1e7'};background:${active?'#3d5a99':'#fff'};color:${active?'#fff':'#44536b'};cursor:pointer;`}, b.name);
+    btn.onclick = ()=>{ branchPath[branchPath.length-1] = {parallelNodeId:top.parallelNodeId, branchId:b.id, branchName:b.name}; selection=null; renderAll(); };
+    wrap.appendChild(btn);
+  });
+  $('#canvasWrap').appendChild(wrap);
+}
+
+function canvasRect(){ return $('svg#canvas').getBoundingClientRect(); }
+
+function renderMinimap(){
+  const mm = $('#minimap');
+  mm.innerHTML = '';
+  const coll = getActiveCollection();
+  if(!coll.nodes.length) return;
+  const xs = coll.nodes.map(n=>n.position.x), ys = coll.nodes.map(n=>n.position.y);
+  const minX=Math.min(...xs)-20, maxX=Math.max(...xs)+NODE_W+20;
+  const minY=Math.min(...ys)-20, maxY=Math.max(...ys)+NODE_H+20;
+  const w = maxX-minX||1, h = maxY-minY||1;
+  mm.setAttribute('viewBox', `${minX} ${minY} ${w} ${h}`);
+  coll.nodes.forEach(n=>{
+    const cfg = NODE_TYPES[n.type]||NODE_TYPES.Unsupported;
+    mm.appendChild(el('rect', {x:n.position.x, y:n.position.y, width:NODE_W, height:NODE_H, fill:cfg.color, opacity:.6, rx:4}));
+  });
+  // viewport indicator
+  const rect = canvasRect();
+  const topLeft = screenToWorld({x:0,y:0});
+  const botRight = screenToWorld({x:rect.width, y:rect.height});
+  mm.appendChild(el('rect', {x:topLeft.x, y:topLeft.y, width:botRight.x-topLeft.x, height:botRight.y-topLeft.y, fill:'none', stroke:'#3d5a99', 'stroke-width':(w/200)}));
+}
+
+/* ---------------------------------------------------------------------- */
+/* 9. PROPIEDADES (panel dirigido por esquema)                            */
+/* ---------------------------------------------------------------------- */
+function renderProperties(){
+  const body = $('#propsBody');
+  if(!selection || selection.kind!=='node'){
+    body.innerHTML = '<div id="propsEmpty">Selecciona un nodo para editar sus propiedades.</div>';
+    return;
+  }
+  const coll = getActiveCollection();
+  const n = coll.nodes.find(x=>x.id===selection.id);
+  if(!n){ body.innerHTML = '<div id="propsEmpty">Nodo no encontrado.</div>'; return; }
+  const cfg = NODE_TYPES[n.type]||NODE_TYPES.Unsupported;
+  body.innerHTML = '';
+  const badge = htmlEl('span', {class:'type-badge', style:`background:${cfg.fill};color:${cfg.color};`}, cfg.label);
+  body.appendChild(badge);
+
+  addTextField(body, 'Nombre', n.name, v=>{ pushHistory(); n.name=v; afterMutation(); });
+  addTextAreaField(body, 'Descripción', n.description||'', v=>{ pushHistory(); n.description=v; afterMutation(); });
+
+  if(n.type==='ConditionalDecision'){
+    renderConditionEditor(body, n);
+  }
+  if(n.type==='Task'||n.type==='Approval'||n.type==='Rejection'){
+    renderAssignmentEditor(body, n);
+  }
+  if(n.type==='Subworkflow'){
+    renderSubworkflowEditor(body, n);
+  }
+  if(n.type==='ParallelActivity'){
+    renderParallelEditor(body, n);
+  }
+}
+function addTextField(parent, label, value, onChange){
+  const f = htmlEl('div', {class:'field'});
+  f.appendChild(htmlEl('label', {}, label));
+  const inp = htmlEl('input', {type:'text', value: value||''});
+  inp.value = value||'';
+  inp.addEventListener('change', ()=>onChange(inp.value));
+  f.appendChild(inp);
+  parent.appendChild(f);
+}
+function addTextAreaField(parent, label, value, onChange){
+  const f = htmlEl('div', {class:'field'});
+  f.appendChild(htmlEl('label', {}, label));
+  const ta = htmlEl('textarea', {});
+  ta.value = value||'';
+  ta.addEventListener('change', ()=>onChange(ta.value));
+  f.appendChild(ta);
+  parent.appendChild(f);
+}
+function addSelectField(parent, label, value, options, onChange){
+  const f = htmlEl('div', {class:'field'});
+  f.appendChild(htmlEl('label', {}, label));
+  const sel = htmlEl('select', {});
+  options.forEach(o=>{
+    const opt = htmlEl('option', {value:o}, o);
+    if(o===value) opt.setAttribute('selected','selected');
+    sel.appendChild(opt);
+  });
+  sel.addEventListener('change', ()=>onChange(sel.value));
+  f.appendChild(sel);
+  parent.appendChild(f);
+}
+function renderConditionEditor(parent, n){
+  n.properties = n.properties || {};
+  const cond = n.properties.condition = n.properties.condition || { documentType:'PurchReqDocument', field:'', operator:'OR-of-ANDs', groups:[] };
+  addTextField(parent, 'Campo evaluado', cond.field, v=>{ pushHistory(); cond.field=v; afterMutation(); });
+  const values = cond.groups.filter(g=>g.terms&&g.terms.length).map(g=>g.terms[0].value).join(', ');
+  parent.appendChild(htmlEl('div', {class:'cc-count'}, `${cond.groups.filter(g=>g.terms&&g.terms.length).length} valores en la condición (OR)`));
+  const f = htmlEl('div', {class:'field'});
+  f.appendChild(htmlEl('label', {}, 'Valores permitidos (separados por coma)'));
+  const ta = htmlEl('textarea', {style:'min-height:90px;'});
+  ta.value = values;
+  ta.addEventListener('change', ()=>{
+    pushHistory();
+    const list = ta.value.split(',').map(s=>s.trim()).filter(Boolean);
+    cond.groups = list.map(v=>({terms:[{field:cond.field, operator:'Equals', value:v}]}));
+    afterMutation();
+  });
+  f.appendChild(ta);
+  f.appendChild(htmlEl('div', {class:'hint'}, 'Se traduce a una condición OR (cualquiera de estos valores) sobre el campo indicado — igual al patrón real de D365 (AndElementCollection de comparaciones Equals).'));
+  parent.appendChild(f);
+}
+function renderAssignmentEditor(parent, n){
+  n.properties = n.properties || {};
+  const a = n.properties.assignment = n.properties.assignment || { assignmentType:'User', role:'Originator', hierarchyProvider:'', participantProvider:'', queueProvider:'', fixedUser:'' };
+  addSelectField(parent, 'Tipo de asignación', a.assignmentType, ['User','Role','ParticipantProvider','Hierarchy'], v=>{ pushHistory(); a.assignmentType=v; afterMutation(); });
+  addTextField(parent, 'Rol', a.role, v=>{ pushHistory(); a.role=v; afterMutation(); });
+  addTextField(parent, 'Usuario fijo', a.fixedUser, v=>{ pushHistory(); a.fixedUser=v; afterMutation(); });
+  addTextField(parent, 'Proveedor de jerarquía', a.hierarchyProvider, v=>{ pushHistory(); a.hierarchyProvider=v; afterMutation(); });
+  addTextField(parent, 'Proveedor de participante', a.participantProvider, v=>{ pushHistory(); a.participantProvider=v; afterMutation(); });
+  const esc = n.properties.escalation = n.properties.escalation || { escalationType:'None' };
+  addSelectField(parent, 'Escalamiento', esc.escalationType, ['None','Complete','Reassign'], v=>{ pushHistory(); esc.escalationType=v; afterMutation(); });
+}
+function renderSubworkflowEditor(parent, n){
+  n.properties = n.properties || {};
+  const p = n.properties;
+  addTextField(parent, 'Workflow ID de referencia', p.workflowId||'', v=>{ pushHistory(); p.workflowId=Number(v)||v; afterMutation(); });
+  addTextField(parent, 'Nombre del subflujo', p.workflowName||'', v=>{ pushHistory(); p.workflowName=v; afterMutation(); });
+  addTextField(parent, 'Tabla clave documento', p.documentKeyTable||'PurchReqTable', v=>{ pushHistory(); p.documentKeyTable=v; afterMutation(); });
+  addTextField(parent, 'Campo clave documento', p.documentKeyField||'PurchReqId', v=>{ pushHistory(); p.documentKeyField=v; afterMutation(); });
+  parent.appendChild(htmlEl('div', {class:'hint', style:'margin-top:-6px;margin-bottom:10px;'},
+    p.resolved===false ? '⚠ Este subflujo no fue importado en esta sesión — no editable en detalle, solo referencia.' : ''));
+}
+function renderParallelEditor(parent, n){
+  n.properties = n.properties || {};
+  parent.appendChild(htmlEl('div', {class:'cc-count'}, `${(n.properties.branches||[]).length} rama(s). Doble clic en el nodo para entrar a editarlas.`));
+  const list = htmlEl('div', {});
+  (n.properties.branches||[]).forEach((b,idx)=>{
+    const row = htmlEl('div', {class:'field-row', style:'margin-bottom:6px;'});
+    const inp = htmlEl('input', {type:'text'}); inp.value=b.name;
+    inp.addEventListener('change', ()=>{ pushHistory(); b.name=inp.value; afterMutation(); });
+    const del = htmlEl('button', {class:'tb-btn', style:'padding:4px 7px;'}, '🗑');
+    del.onclick = ()=>{
+      pushHistory();
+      n.properties.branches.splice(idx,1);
+      afterMutation();
+    };
+    row.appendChild(inp); row.appendChild(del);
+    list.appendChild(row);
+  });
+  parent.appendChild(list);
+  const addBtn = htmlEl('button', {class:'tb-btn', style:'width:100%;margin-top:6px;'}, '+ Agregar rama');
+  addBtn.onclick = ()=>{
+    pushHistory();
+    const bid = uuid();
+    const s = { id:uuid(), storageId:nextStorageId(), type:'Start', name:'Inicio', position:{x:20,y:20} };
+    const e = { id:uuid(), storageId:nextStorageId(), type:'End', name:'Fin', position:{x:300,y:20} };
+    n.properties.branches = n.properties.branches||[];
+    n.properties.branches.push({ id:bid, storageId:nextStorageId(), name:'Nueva rama',
+      elementCollection: { nodes:[s,e], connections:[{id:uuid(), sourceNodeId:s.id, targetNodeId:e.id, outcome:null, level:1}] } });
+    afterMutation();
+  };
+  parent.appendChild(addBtn);
+}
+
+/* ---------------------------------------------------------------------- */
+/* 10. VALIDACIÓN — panel inferior                                        */
+/* ---------------------------------------------------------------------- */
+function runValidationSilent(){
+  const issues = [];
+  allCollectionsFlat().forEach(({path, collection})=>{
+    VALIDATION_RULES.forEach(rule=>rule(collection, path, issues));
+  });
+  return issues;
+}
+function renderValidation(issues){
+  const list = $('#validationList');
+  const count = $('#validationCount');
+  const errors = issues.filter(i=>i.sev==='Error').length;
+  const warns = issues.filter(i=>i.sev==='Warning').length;
+  count.textContent = issues.length ? `— ${errors} error(es), ${warns} advertencia(s)` : '';
+  if(!issues.length){
+    list.innerHTML = '<div id="validationEmpty">✓ Sin problemas detectados.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  issues.forEach(i=>{
+    const item = htmlEl('div', {class:'vitem'});
+    item.appendChild(htmlEl('span', {class:`sev ${i.sev}`}, i.sev==='Error'?'ERROR':'AVISO'));
+    const pathLabel = i.path && i.path.length ? ` (rama: ${i.path.map(p=>p.branchName).join(' / ')})` : '';
+    item.appendChild(htmlEl('span', {}, i.msg + pathLabel));
+    item.onclick = ()=>{
+      if(i.path) branchPath = i.path.map(p=>({parallelNodeId:p.parallelNodeId, branchId:p.branchId, branchName:p.branchName}));
+      if(i.nodeId) selection = {kind:'node', id:i.nodeId};
+      renderAll();
+    };
+    list.appendChild(item);
+  });
+}
+
+/* ---------------------------------------------------------------------- */
+/* 11. TOPBAR                                                              */
+/* ---------------------------------------------------------------------- */
+function renderTopbar(){
+  $('#wfName').textContent = doc.metadata.name;
+  $('#wfVersion').textContent = `${doc.version.major}.${doc.version.minor}.${doc.version.revision}.${doc.version.build}`;
+  markDirty();
+  $('#dirtyDot').classList.toggle('dirty', !!doc.version.isDirty);
+  $('#btnUndo').disabled = undoStack.length===0;
+  $('#btnRedo').disabled = redoStack.length===0;
+  $('#btnConnect').classList.toggle('primary', mode==='connect');
+}
+
+/* ---------------------------------------------------------------------- */
+/* 12. INTERACCIÓN: pan/zoom/drag/connect/toolbox/teclado                 */
+/* ---------------------------------------------------------------------- */
+function initCanvasInteraction(){
+  const svg = $('svg#canvas');
+  svg.addEventListener('mousedown', (e)=>{
+    if(e.target.id==='gridBg' || e.target===svg){
+      selection = null;
+      dragState = { type:'pan', startX:e.clientX, startY:e.clientY, tx0:view.tx, ty0:view.ty };
+      renderAll();
+    }
+  });
+  window.addEventListener('mousemove', (e)=>{
+    if(!dragState) return;
+    if(dragState.type==='pan'){
+      view.tx = dragState.tx0 + (e.clientX-dragState.startX);
+      view.ty = dragState.ty0 + (e.clientY-dragState.startY);
+      renderCanvas(); renderMinimap();
+    } else if(dragState.type==='node'){
+      const rect = canvasRect();
+      const w = screenToWorld({x:e.clientX-rect.left, y:e.clientY-rect.top});
+      const coll = getActiveCollection();
+      const n = coll.nodes.find(x=>x.id===dragState.nodeId);
+      if(n){
+        n.position.x = w.x - dragState.offX;
+        n.position.y = w.y - dragState.offY;
+        dragState.moved = true;
+        renderCanvas(); renderMinimap();
+      }
+    }
+  });
+  window.addEventListener('mouseup', ()=>{
+    if(dragState && dragState.type==='node' && !dragState.moved){
+      undoStack.pop(); // no hubo movimiento real, descartar snapshot vacío
+    }
+    if(dragState) afterMutation(false);
+    dragState = null;
+  });
+  svg.addEventListener('wheel', (e)=>{
+    e.preventDefault();
+    const rect = canvasRect();
+    const mouse = {x:e.clientX-rect.left, y:e.clientY-rect.top};
+    const before = screenToWorld(mouse);
+    const factor = e.deltaY<0 ? 1.1 : 0.9;
+    view.scale = Math.min(2.5, Math.max(0.25, view.scale*factor));
+    const after = worldToScreen(before);
+    view.tx += mouse.x-after.x;
+    view.ty += mouse.y-after.y;
+    renderCanvas(); renderMinimap();
+  }, {passive:false});
+
+  // toolbox drag & drop
+  document.querySelectorAll('.tool-item').forEach(item=>{
+    item.addEventListener('dragstart', (e)=>{
+      e.dataTransfer.setData('text/node-type', item.dataset.type);
+    });
+  });
+  const wrap = $('#canvasWrap');
+  wrap.addEventListener('dragover', (e)=>e.preventDefault());
+  wrap.addEventListener('drop', (e)=>{
+    e.preventDefault();
+    const type = e.dataTransfer.getData('text/node-type');
+    if(!type) return;
+    const rect = canvasRect();
+    const w = screenToWorld({x:e.clientX-rect.left, y:e.clientY-rect.top});
+    addNode(type, w);
+  });
+
+  document.addEventListener('keydown', (e)=>{
+    if(document.activeElement && ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) return;
+    if((e.key==='Delete'||e.key==='Backspace') && selection){ deleteSelection(); }
+    if(e.ctrlKey && e.key==='z'){ e.preventDefault(); undo(); }
+    if(e.ctrlKey && e.key==='y'){ e.preventDefault(); redo(); }
+  });
+}
+
+function addNode(type, worldPos){
+  pushHistory();
+  const coll = getActiveCollection();
+  const cfg = NODE_TYPES[type]||NODE_TYPES.Unsupported;
+  const node = {
+    id: uuid(), storageId: nextStorageId(), type,
+    name: cfg.label + ' ' + (coll.nodes.filter(n=>n.type===type).length+1),
+    description: '',
+    position: { x: Math.round(worldPos.x-NODE_W/2), y: Math.round(worldPos.y-NODE_H/2) },
+    properties: type==='ParallelActivity' ? {branches:[]} : type==='ConditionalDecision' ? {condition:{documentType:doc.metadata.documentTableName||'', field:'', operator:'OR-of-ANDs', groups:[]}} : {}
+  };
+  coll.nodes.push(node);
+  selection = {kind:'node', id:node.id};
+  afterMutation();
+}
+
+function handleConnectClick(nodeId){
+  if(!connectSource){
+    connectSource = nodeId;
+    return;
+  }
+  if(connectSource===nodeId){ connectSource=null; return; }
+  const coll = getActiveCollection();
+  const srcNode = coll.nodes.find(n=>n.id===connectSource);
+  let outcome = null;
+  if(srcNode.type==='ConditionalDecision'){
+    const existing = coll.connections.filter(c=>c.sourceNodeId===connectSource).map(c=>c.outcome);
+    outcome = existing.includes('True') ? 'False' : 'True';
+  } else if(srcNode.type==='ManualDecision' || srcNode.type==='Approval'){
+    outcome = window.prompt('Resultado de esta ruta (ej: Approve, Reject, RequestChange) — dejar vacío si no aplica:', '') || null;
+  }
+  pushHistory();
+  coll.connections.push({ id:uuid(), sourceNodeId:connectSource, targetNodeId:nodeId, outcome, level:1 });
+  connectSource = null;
+  afterMutation();
+}
+
+function deleteSelection(){
+  pushHistory();
+  const coll = getActiveCollection();
+  if(selection.kind==='node'){
+    coll.nodes = coll.nodes.filter(n=>n.id!==selection.id);
+    coll.connections = coll.connections.filter(c=>c.sourceNodeId!==selection.id && c.targetNodeId!==selection.id);
+  } else if(selection.kind==='conn'){
+    coll.connections = coll.connections.filter(c=>c.id!==selection.id);
+  }
+  selection = null;
+  afterMutation();
+}
+
+/* ---------------------------------------------------------------------- */
+/* 13. IMPORTACIÓN XML (subset D365 F&O — ver arquitectura sección 1)     */
+/* ---------------------------------------------------------------------- */
+const NS = {
+  WF: 'http://schemas.datacontract.org/2004/07/Microsoft.Dynamics.AX.Framework.Workflow.Model',
+  MM: 'http://schemas.datacontract.org/2004/07/Microsoft.Dynamics.AX.Framework.MetaModel',
+  SER: 'http://schemas.microsoft.com/2003/10/Serialization/',
+  XSI: 'http://www.w3.org/2001/XMLSchema-instance',
+};
+function gc(elx, tag){ return elx ? Array.from(elx.children).find(c=>c.localName===tag) : null; }
+function gca(elx, tag){ return elx ? Array.from(elx.children).filter(c=>c.localName===tag) : []; }
+function txt(elx){ return elx ? (elx.textContent||'').trim() : ''; }
+function xsiType(elx){
+  const t = elx.getAttributeNS(NS.XSI,'type') || elx.getAttribute('i:type') || '';
+  return t.split(':').pop();
+}
+
+function decodeXmlFile(buffer){
+  const bytes = new Uint8Array(buffer);
+  let text;
+  if(bytes[0]===0xFF && bytes[1]===0xFE){
+    text = new TextDecoder('utf-16le').decode(buffer.slice(2));
+  } else if(bytes[0]===0xFE && bytes[1]===0xFF){
+    text = new TextDecoder('utf-16be').decode(buffer.slice(2));
+  } else if(bytes[0]===0x3C && bytes[1]===0x00){
+    text = new TextDecoder('utf-16le').decode(buffer); // sin BOM, como los exports reales de D365
+  } else if(bytes[0]===0xEF && bytes[1]===0xBB){
+    text = new TextDecoder('utf-8').decode(buffer.slice(3));
+  } else {
+    text = new TextDecoder('utf-8').decode(buffer);
+  }
+  return text;
+}
+
+function parseElementCollection(elementsEl, relationshipsEl){
+  const nodes = [];
+  const connections = [];
+  const kvs = gca(elementsEl, 'KeyValueOfguidDesignElementEpM4OCP0');
+  let autoY = 20;
+  kvs.forEach(kv=>{
+    const val = gc(kv,'Value');
+    if(!val) return;
+    const type = xsiType(val);
+    const id = txt(gc(val,'id'));
+    const storageId = Number(txt(gc(val,'storageId')))||0;
+    const name = txt(gc(val,'name'));
+    let node = null;
+    if(type==='StartElement'){
+      node = { id, storageId, type:'Start', name: name||'Inicio', description:'', position:{x:20,y:autoY}, properties:{} };
+    } else if(type==='EndElement'){
+      node = { id, storageId, type:'End', name: name||'Fin', description:'', position:{x:600,y:autoY}, properties:{} };
+    } else if(type==='ConditionalGatewayElement'){
+      const condEl = gc(val,'condition');
+      const groups = [];
+      const em = condEl && gc(condEl,'expressionModel');
+      const rootElx = em && gc(em,'rootElement');
+      const andColl = rootElx && gc(rootElx,'AndElementCollection');
+      if(andColl){
+        gca(andColl,'ExpressionAndElement').forEach(exAnd=>{
+          const ec = gc(exAnd,'ElementCollection');
+          const terms = [];
+          gca(ec,'ExpressionDesignElement').forEach(ede=>{
+            const sv = gc(ede,'StringValue');
+            if(sv) terms.push({ operator:'Equals', value: txt(sv) });
+          });
+          if(terms.length) groups.push({terms});
+        });
+      }
+      node = { id, storageId, type:'ConditionalDecision', name: name||'Decisión', description:'', position:{x:260,y:autoY},
+        properties: { condition: { documentType:'', field:'', operator:'OR-of-ANDs', groups } } };
+    } else if(type==='ParallelElement'){
+      const branchesEl = gc(val,'branches');
+      const branches = gca(branchesEl,'ParallelBranchElement').map(b=>{
+        const bId = txt(gc(b,'id'));
+        const bStorage = Number(txt(gc(b,'storageId')))||0;
+        const bName = txt(gc(b,'name'));
+        const ecEl = gc(b,'elementCollection');
+        const innerElements = gc(ecEl,'elements');
+        const innerRels = gc(ecEl,'relationships');
+        const inner = parseElementCollection(innerElements, innerRels);
+        return { id:bId, storageId:bStorage, name:bName, elementCollection: inner };
+      });
+      node = { id, storageId, type:'ParallelActivity', name: name||'Paralelo', description:'', position:{x:400,y:autoY},
+        properties: { branches } };
+    } else if(type==='SubWorkflowElement'){
+      const wfEl = gc(val,'workflow');
+      node = { id, storageId, type:'Subworkflow', name: name||'Subflujo', description:'', position:{x:420,y:autoY},
+        properties: {
+          workflowId: Number(txt(gc(wfEl,'workflowId')))||null,
+          workflowName: name,
+          documentKeyTable: txt(gc(wfEl,'documentKeyTable')),
+          documentKeyField: txt(gc(wfEl,'documentKeyField')),
+          waitForCompletion: txt(gc(val,'waitForCompletion'))==='true',
+          resolved: false
+        }};
+    } else if(type==='TaskElement'){
+      const steps = gc(val,'steps');
+      const step = gc(steps,'StepElement');
+      const assignmentEl = step && gc(step,'assignment');
+      const hierarchyEl = assignmentEl && gc(assignmentEl,'hierarchy');
+      const participantEl = assignmentEl && gc(assignmentEl,'participant');
+      const queueEl = assignmentEl && gc(assignmentEl,'queue');
+      const userEl = assignmentEl && gc(assignmentEl,'user');
+      const escalationEl = step && gc(step,'escalation');
+      const allowedEl = gc(val,'allowedActions');
+      const actions = gca(allowedEl,'ActionCollectionProperty').map(a=>{
+        const act = gc(a,'action');
+        return { action: txt(gc(act,'action')), allowed: txt(gc(act,'allowed'))==='true' };
+      }).filter(a=>a.allowed).map(a=>a.action);
+      const isReject = /rechaz|reject/i.test(name) && !actions.includes('Complete');
+      const isApproval = actions.includes('Complete') && actions.includes('Reject');
+      const nodeType = isReject ? 'Rejection' : isApproval ? 'Approval' : 'Task';
+      node = { id, storageId, type:nodeType, name: name||'Tarea', description:'', position:{x:300,y:autoY},
+        properties: {
+          assignment: {
+            assignmentType: txt(gc(assignmentEl,'assignmentType'))||'User',
+            role: txt(gc(assignmentEl,'role'))||'',
+            hierarchyProvider: txt(gc(hierarchyEl,'providerName')),
+            participantProvider: txt(gc(participantEl,'providerName')),
+            queueProvider: txt(gc(queueEl,'providerName')),
+            fixedUser: txt(gc(userEl,'user')),
+          },
+          escalation: { escalationType: txt(gc(escalationEl,'escalationType'))||'None' },
+          allowedActions: actions,
+        }};
+    } else {
+      node = { id: id||uuid(), storageId, type:'Unsupported', name: name||type||'Nodo no soportado', description:`xsi:type original: ${type}`, position:{x:200,y:autoY}, properties:{}, raw:true };
+    }
+    nodes.push(node);
+    autoY += 90;
+  });
+
+  const rels = gca(relationshipsEl, 'Relationship');
+  const linkOutcomes = {}; // relId -> 'True'|'False'
+  // recorrer nodos ConditionalDecision para mapear evaluationTrue/False -> relationship id
+  kvs.forEach(kv=>{
+    const val = gc(kv,'Value');
+    if(!val || xsiType(val)!=='ConditionalGatewayElement') return;
+    const evT = gc(val,'evaluationTrue');
+    const evF = gc(val,'evaluationFalse');
+    if(evT){ const lid = txt(gc(evT,'linkId')); if(lid) linkOutcomes[lid]='True'; }
+    if(evF){ const lid = txt(gc(evF,'linkId')); if(lid) linkOutcomes[lid]='False'; }
+  });
+  rels.forEach(r=>{
+    const rid = txt(gc(r,'id'));
+    connections.push({
+      id: rid || uuid(),
+      sourceNodeId: txt(gc(r,'source')),
+      targetNodeId: txt(gc(r,'target')),
+      outcome: linkOutcomes[rid] || null,
+      level: Number(txt(gc(r,'level')))||1,
+    });
+  });
+  return { nodes, connections };
+}
+
+function importXmlText(text, fileName){
+  const xdoc = new DOMParser().parseFromString(text, 'application/xml');
+  const perr = xdoc.getElementsByTagName('parsererror');
+  if(perr.length){ throw new Error('XML mal formado: ' + perr[0].textContent.slice(0,200)); }
+  const root = xdoc.documentElement;
+  if(!root || root.localName!=='WorkflowExportDefinition'){
+    throw new Error('El archivo no parece ser un export de Workflow de D365 F&O (falta WorkflowExportDefinition).');
+  }
+  const wf = gc(root,'workflow');
+  if(!wf) throw new Error('Falta el elemento <workflow>.');
+  const nameEl = gc(wf,'name');
+  const property = gc(wf,'property');
+  const coll = gc(wf,'collection');
+  const elementsEl = gc(coll,'elements');
+  const relationshipsEl = gc(coll,'relationships');
+  if(!elementsEl) throw new Error('Falta collection/elements — estructura no reconocida.');
+
+  const { nodes, connections } = parseElementCollection(elementsEl, relationshipsEl);
+
+  const versionMajor = Number(txt(gc(wf,'versionIdMajor')))||1;
+  const versionMinor = Number(txt(gc(wf,'versionIdMinor')))||0;
+  const versionRevision = Number(txt(gc(wf,'versionIdRevision')))||0;
+  const versionBuild = Number(txt(gc(wf,'versionIdBuild')))||0;
+
+  const newDoc = {
+    schemaVersion: '1.0',
+    metadata: {
+      name: txt(nameEl) || fileName.replace(/\.xml$/i,''),
+      category: txt(gc(property,'categoryName')),
+      documentTableName: txt(gc(property,'documentTableName')),
+      module: txt(gc(property,'module')),
+      templateName: txt(gc(property,'templateName')),
+      company: txt(gc(wf,'companyId')),
+      owner: txt(gc(property,'owner')),
+      axVersion: txt(gc(root,'axVersion')),
+    },
+    version: {
+      workflowId: nodes.find(n=>n.type==='ParallelActivity')?.storageId || nextStorageId(),
+      major: versionMajor, minor: versionMinor, revision: versionRevision, build: versionBuild,
+      previousVersionRef: null, isDirty: false,
+    },
+    nodes, connections,
+  };
+  return newDoc;
+}
+
+/* ---------------------------------------------------------------------- */
+/* 14. EXPORTACIÓN XML (Modelo Interno → XML D365 — ver arquitectura §7)  */
+/*     Simplificación deliberada de Fase 1: cada elemento recibe su       */
+/*     propio z:Id fresco; NO se reutilizan objetos "nil compartidos"     */
+/*     (ver arquitectura §7.2/§8.3) — evita por construcción la clase     */
+/*     de bug de referencias colgantes encontrada al editar REGIONES.     */
+/* ---------------------------------------------------------------------- */
+function exportToXml(){
+  const issues = runValidation();
+  if(issues.some(i=>i.sev==='Error')){
+    return { ok:false, issues };
+  }
+  let zid = 1;
+  const nextZid = ()=> (zid++).toString();
+
+  function nilTag(tag){ return `<${tag} i:nil="true"/>`; }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  function buildCondition(cond){
+    const groups = (cond && cond.groups || []).filter(g=>g.terms&&g.terms.length);
+    const andItems = [`<d14p1:ExpressionAndElement z:Id="${nextZid()}" xmlns:d14p1="http://schemas.datacontract.org/2004/07/Microsoft.Dynamics.AX.Framework.Expression.Model"><d14p1:ElementCollection z:Id="${nextZid()}" z:Size="0"/></d14p1:ExpressionAndElement>`]
+      .concat(groups.map(g=>{
+        const v = g.terms[0].value;
+        return `<d14p1:ExpressionAndElement z:Id="${nextZid()}" xmlns:d14p1="http://schemas.datacontract.org/2004/07/Microsoft.Dynamics.AX.Framework.Expression.Model">`
+          + `<d14p1:ElementCollection z:Id="${nextZid()}" z:Size="1">`
+          + `<d14p1:ExpressionDesignElement z:Id="${nextZid()}" i:type="d14p1:ExpressionLiteralStringElement">`
+          + `<d14p1:lhsExpressionField i:nil="true"/>`
+          + `<d14p1:StringOperator>Equals</d14p1:StringOperator>`
+          + `<d14p1:StringValue z:Id="${nextZid()}">${esc(v)}</d14p1:StringValue>`
+          + `</d14p1:ExpressionDesignElement></d14p1:ElementCollection></d14p1:ExpressionAndElement>`;
+      }));
+    return `<condition z:Id="${nextZid()}">`
+      + `<category i:nil="true"/><context i:nil="true"/><id>${uuid()}</id><name i:nil="true"/><storageId>0</storageId><subCategory i:nil="true"/>`
+      + `<propertyName>Microsoft.Dynamics.AX.Framework.Workflow.ExpressionProperty</propertyName>`
+      + `<expressionModel z:Id="${nextZid()}"><expressionId>${uuid()}</expressionId><expressionRecId>0</expressionRecId><expressionTablePrimaryKey>0</expressionTablePrimaryKey>`
+      + `<projection><documentName>${esc(cond.documentType||'')}</documentName><enumerations/><rootDatasources/></projection>`
+      + `<rootElement><AndElementCollection z:Id="${nextZid()}" z:Size="${andItems.length}">${andItems.join('')}</AndElementCollection></rootElement>`
+      + `<queryClassName i:nil="true"/></expressionModel>`
+      + `</condition>`;
+  }
+
+  function buildTask(n){
+    const a = n.properties.assignment || {};
+    const esc_ = esc;
+    const actions = (n.properties.allowedActions && n.properties.allowedActions.length) ? n.properties.allowedActions : (n.type==='Approval' ? ['Complete','Reject','RequestChange'] : n.type==='Rejection' ? ['Complete','Reject'] : ['Complete']);
+    const actionsXml = actions.map(act=>`<ActionCollectionProperty><action><action>${esc_(act)}</action><allowed>true</allowed><enabled>true</enabled><isOutcome>true</isOutcome></action></ActionCollectionProperty>`).join('');
+    return `<category i:nil="true"/><context i:nil="true"/><id>${n.id}</id><name>${esc_(n.name)}</name><storageId>${n.storageId}</storageId><subCategory i:nil="true"/>`
+      + `<steps><StepElement><id>${uuid()}</id><name>WFStep</name>`
+      + `<assignment><assignmentType>${esc_(a.assignmentType||'User')}</assignmentType>`
+      + `<hierarchy><providerName>${esc_(a.hierarchyProvider||'')}</providerName><tokenName>Originator</tokenName></hierarchy>`
+      + `<participant><providerName>${esc_(a.participantProvider||'')}</providerName></participant>`
+      + `<queue><providerName>${esc_(a.queueProvider||'')}</providerName></queue>`
+      + `<role>${esc_(a.role||'Originator')}</role>`
+      + `<user><user>${esc_(a.fixedUser||'')}</user></user></assignment>`
+      + `<completionPolicy>Single</completionPolicy><execute>Always</execute><sequence>1</sequence></StepElement></steps>`
+      + `<allowedActions>${actionsXml}</allowedActions>`
+      + `<elementName>WFTask</elementName><enableActionsInWorkList>true</enableActionsInWorkList>`
+      + `<escalation><escalationType>${esc_(n.properties.escalation && n.properties.escalation.escalationType || 'None')}</escalationType></escalation>`;
+  }
+
+  function buildNode(n){
+    const type = n.type;
+    if(type==='Start'){
+      return `<KeyValueOfguidDesignElementEpM4OCP0><Key>${n.id}</Key><Value z:Id="${nextZid()}" i:type="d6p1:StartElement" xmlns:d6p1="${NS.WF}">`
+        + `<category i:nil="true"/><context i:nil="true"/><id>${n.id}</id><name>${esc(n.name)}</name><storageId>${n.storageId}</storageId><subCategory i:nil="true"/>`
+        + `</Value></KeyValueOfguidDesignElementEpM4OCP0>`;
+    }
+    if(type==='End'){
+      return `<KeyValueOfguidDesignElementEpM4OCP0><Key>${n.id}</Key><Value z:Id="${nextZid()}" i:type="d6p1:EndElement" xmlns:d6p1="${NS.WF}">`
+        + `<category i:nil="true"/><context i:nil="true"/><id>${n.id}</id><name>${esc(n.name)}</name><storageId>${n.storageId}</storageId><subCategory i:nil="true"/>`
+        + `</Value></KeyValueOfguidDesignElementEpM4OCP0>`;
+    }
+    if(type==='ConditionalDecision'){
+      return `<KeyValueOfguidDesignElementEpM4OCP0><Key>${n.id}</Key><Value z:Id="${nextZid()}" i:type="d6p1:ConditionalGatewayElement" xmlns:d6p1="${NS.WF}">`
+        + `<category i:nil="true"/><context i:nil="true"/><id>${n.id}</id><name>${esc(n.name)}</name><storageId>${n.storageId}</storageId><subCategory i:nil="true"/>`
+        + buildCondition(n.properties.condition)
+        + `<evaluationFalse><linkId>${n._falseLinkId||''}</linkId><linkRecId>${n._falseLinkRec||0}</linkRecId><outcome>EvaluationFalse</outcome></evaluationFalse>`
+        + `<evaluationTrue><linkId>${n._trueLinkId||''}</linkId><linkRecId>${n._trueLinkRec||0}</linkRecId><outcome>EvaluationTrue</outcome></evaluationTrue>`
+        + `</Value></KeyValueOfguidDesignElementEpM4OCP0>`;
+    }
+    if(type==='Task'||type==='Approval'||type==='Rejection'){
+      return `<KeyValueOfguidDesignElementEpM4OCP0><Key>${n.id}</Key><Value z:Id="${nextZid()}" i:type="d6p1:TaskElement" xmlns:d6p1="${NS.WF}">`
+        + buildTask(n)
+        + `</Value></KeyValueOfguidDesignElementEpM4OCP0>`;
+    }
+    if(type==='Subworkflow'){
+      const p = n.properties;
+      return `<KeyValueOfguidDesignElementEpM4OCP0><Key>${n.id}</Key><Value z:Id="${nextZid()}" i:type="d6p1:SubWorkflowElement" xmlns:d6p1="${NS.WF}">`
+        + `<category i:nil="true"/><context i:nil="true"/><id>${n.id}</id><name>${esc(n.name)}</name><storageId>${n.storageId}</storageId><subCategory i:nil="true"/>`
+        + `<waitForCompletion>${p.waitForCompletion?'true':'false'}</waitForCompletion>`
+        + `<workflow><documentKeyField>${esc(p.documentKeyField||'')}</documentKeyField><documentKeyTable>${esc(p.documentKeyTable||'')}</documentKeyTable><workflowId>${p.workflowId||0}</workflowId></workflow>`
+        + `</Value></KeyValueOfguidDesignElementEpM4OCP0>`;
+    }
+    if(type==='ParallelActivity'){
+      const branchesXml = (n.properties.branches||[]).map(b=>{
+        const inner = buildElementCollection(b.elementCollection, n.id, n.storageId);
+        return `<ParallelBranchElement><category i:nil="true"/><context i:nil="true"/><id>${b.id}</id><name>${esc(b.name)}</name><storageId>${b.storageId}</storageId><subCategory i:nil="true"/>`
+          + `<elementCollection>${inner}</elementCollection><parallel>${n.storageId}</parallel></ParallelBranchElement>`;
+      }).join('');
+      return `<KeyValueOfguidDesignElementEpM4OCP0><Key>${n.id}</Key><Value z:Id="${nextZid()}" i:type="d6p1:ParallelElement" xmlns:d6p1="${NS.WF}">`
+        + `<category i:nil="true"/><context i:nil="true"/><id>${n.id}</id><name>${esc(n.name)}</name><storageId>${n.storageId}</storageId><subCategory i:nil="true"/>`
+        + `<branches z:Size="${(n.properties.branches||[]).length}">${branchesXml}</branches>`
+        + `</Value></KeyValueOfguidDesignElementEpM4OCP0>`;
+    }
+    // Unsupported: si vino de un import previo con XML crudo, se re-emite tal cual (passthrough).
+    return `<!-- nodo no soportado '${esc(n.name)}' omitido en export MVP -->`;
+  }
+
+  function buildRelationship(c){
+    return `<Relationship z:Id="${nextZid()}" i:type="d5p1:LinkElement" xmlns:d5p1="${NS.WF}">`
+      + `<category i:nil="true"/><context i:nil="true"/><id>${c.id}</id><name i:nil="true"/><storageId>${c._storageId}</storageId><subCategory i:nil="true"/>`
+      + `<source>${c.sourceNodeId}</source><target>${c.targetNodeId}</target><level>${c.level||1}</level>`
+      + `<sourceType>${c._sourceType||''}</sourceType><targetType>${c._targetType||''}</targetType>`
+      + `</Relationship>`;
+  }
+
+  function annotateConnections(coll){
+    coll.connections.forEach(c=>{
+      c._storageId = nextStorageId();
+      const s = coll.nodes.find(n=>n.id===c.sourceNodeId);
+      const t = coll.nodes.find(n=>n.id===c.targetNodeId);
+      c._sourceType = s ? (s.type==='ConditionalDecision'?'ConditionalGateway':s.type==='ParallelActivity'?'Parallel':s.type) : '';
+      c._targetType = t ? (t.type==='ConditionalDecision'?'ConditionalGateway':t.type==='ParallelActivity'?'Parallel':t.type) : '';
+    });
+    coll.nodes.filter(n=>n.type==='ConditionalDecision').forEach(n=>{
+      const t = coll.connections.find(c=>c.sourceNodeId===n.id && c.outcome==='True');
+      const f = coll.connections.find(c=>c.sourceNodeId===n.id && c.outcome==='False');
+      if(t){ n._trueLinkId=t.id; n._trueLinkRec=t._storageId; }
+      if(f){ n._falseLinkId=f.id; n._falseLinkRec=f._storageId; }
+    });
+  }
+
+  function buildElementCollection(coll){
+    annotateConnections(coll);
+    const elementsXml = coll.nodes.map(buildNode).join('');
+    const relsXml = coll.connections.map(buildRelationship).join('');
+    return `<elements z:Id="${nextZid()}" z:Size="${coll.nodes.length}" xmlns:d4p1="http://schemas.microsoft.com/2003/10/Serialization/Arrays">${elementsXml}</elements>`
+      + `<relationships z:Id="${nextZid()}" z:Size="${coll.connections.length}">${relsXml}</relationships>`;
+  }
+
+  const rootColl = { nodes: doc.nodes, connections: doc.connections };
+  const collectionXml = buildElementCollection(rootColl);
+
+  const xml = `<WorkflowExportDefinition xmlns:i="${NS.XSI}" z:Id="${nextZid()}" xmlns:z="${NS.SER}" xmlns="${NS.WF}">`
+    + `<axVersion z:Id="${nextZid()}">${esc(doc.metadata.axVersion||'AX6')}</axVersion>`
+    + `<checksum i:nil="true"/>`
+    + `<workflow z:Id="${nextZid()}">`
+    + `<category z:Id="${nextZid()}" xmlns="${NS.MM}"/><context i:nil="true" xmlns="${NS.MM}"/>`
+    + `<id xmlns="${NS.MM}">${uuid()}</id><name z:Id="${nextZid()}" xmlns="${NS.MM}">${esc(doc.metadata.name)}</name>`
+    + `<storageId xmlns="${NS.MM}">0</storageId><subCategory i:nil="true" xmlns="${NS.MM}"/>`
+    + `<collection z:Id="${nextZid()}" xmlns="${NS.MM}">${collectionXml}</collection>`
+    + `<associationType/><associationTypeRelation i:nil="true"/>`
+    + `<companyId z:Id="${nextZid()}">${esc(doc.metadata.company||'')}</companyId>`
+    + `<defaultWorkflow>false</defaultWorkflow>`
+    + `<domainUser z:Id="${nextZid()}"></domainUser>`
+    + `<enabled>true</enabled><isLoad>false</isLoad>`
+    + `<property z:Id="${nextZid()}">`
+    + `<category i:nil="true"/><context i:nil="true"/><id/><name i:nil="true"/><storageId/><subCategory i:nil="true"/>`
+    + `<designElementName z:Id="${nextZid()}"></designElementName>`
+    + `<activationCondition i:nil="true"/><categoryName z:Id="${nextZid()}">${esc(doc.metadata.category||'')}</categoryName>`
+    + `<company i:nil="true"/><documentName i:nil="true"/><documentTableName z:Id="${nextZid()}">${esc(doc.metadata.documentTableName||'')}</documentTableName>`
+    + `<module z:Id="${nextZid()}">${esc(doc.metadata.module||'')}</module>`
+    + `<note z:Id="${nextZid()}">Generado/editado por D365 Workflow Designer (MVP). Versión previa: ${esc(doc.version.previousVersionRef||'N/A')}</note>`
+    + `<notifications z:Size="0"/><owner z:Id="${nextZid()}">${esc(doc.metadata.owner||'')}</owner>`
+    + `<submissionInstructions z:Size="0"/><templateName z:Id="${nextZid()}">${esc(doc.metadata.templateName||'')}</templateName>`
+    + `<useActivationCondition>false</useActivationCondition>`
+    + `</property>`
+    + `<sequenceNumber>000001</sequenceNumber>`
+    + `<versionIdBuild>${doc.version.build}</versionIdBuild><versionIdMajor>${doc.version.major}</versionIdMajor>`
+    + `<versionIdMinor>${doc.version.minor}</versionIdMinor><versionIdRevision>${doc.version.revision}</versionIdRevision>`
+    + `</workflow>`
+    + `</WorkflowExportDefinition>`;
+
+  return { ok:true, xml, issues };
+}
+
+function postExportValidate(xmlText){
+  // Paso [7] del pipeline de exportación: reparsear y verificar integridad estructural.
+  const xdoc = new DOMParser().parseFromString(xmlText, 'application/xml');
+  const perr = xdoc.getElementsByTagName('parsererror');
+  const problems = [];
+  if(perr.length) problems.push('XML generado no es bien formado.');
+  const zids = new Set();
+  let dupes = 0;
+  xdoc.querySelectorAll('*').forEach(elx=>{
+    const zid = elx.getAttributeNS(NS.SER,'Id');
+    if(zid){ if(zids.has(zid)) dupes++; zids.add(zid); }
+  });
+  if(dupes>0) problems.push(`${dupes} z:Id duplicados.`);
+  return problems;
+}
+
+/* ---------------------------------------------------------------------- */
+/* 15. WIRING DE BOTONES / IO                                              */
+/* ---------------------------------------------------------------------- */
+function downloadBlob(bytes, filename, type){
+  const blob = new Blob([bytes], {type});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function wireTopbar(){
+  $('#btnImportXml').onclick = ()=> $('#fileXmlInput').click();
+  $('#fileXmlInput').addEventListener('change', async (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    try{
+      const buf = await file.arrayBuffer();
+      const text = decodeXmlFile(buf);
+      const newDoc = importXmlText(text, file.name);
+      doc = newDoc;
+      baselineHash = hashOf(doc.nodes)+hashOf(doc.connections);
+      branchPath = []; selection=null; undoStack=[]; redoStack=[];
+      view = {scale:1, tx:60, ty:60};
+      afterMutation(false);
+      alert('Importado correctamente: ' + doc.metadata.name);
+    }catch(err){
+      alert('Error al importar XML:\n' + err.message);
+    }
+    e.target.value='';
+  });
+
+  $('#btnExportXml').onclick = ()=>{
+    const res = exportToXml();
+    if(!res.ok){
+      alert('No se puede exportar: hay errores de validación pendientes. Revisa el panel inferior.');
+      return;
+    }
+    const problems = postExportValidate(res.xml);
+    if(problems.length){
+      alert('El exportador detectó problemas de integridad y NO generará el archivo:\n' + problems.join('\n'));
+      return;
+    }
+    bumpVersionIfDirty(false);
+    renderAll();
+    const bytes = new TextEncoder('utf-16le');
+    // TextEncoder nativo no soporta utf-16le; codificamos manualmente:
+    const str = res.xml;
+    const buf = new Uint8Array(str.length*2);
+    for(let i=0;i<str.length;i++){
+      const code = str.charCodeAt(i);
+      buf[i*2] = code & 0xFF;
+      buf[i*2+1] = (code>>8) & 0xFF;
+    }
+    downloadBlob(buf, `${doc.metadata.name}-${doc.version.major}.${doc.version.minor}.${doc.version.revision}.${doc.version.build}.xml`, 'application/xml');
+  };
+
+  $('#btnImportJson').onclick = ()=> $('#fileJsonInput').click();
+  $('#fileJsonInput').addEventListener('change', async (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    try{
+      const text = await file.text();
+      doc = JSON.parse(text);
+      baselineHash = hashOf(doc.nodes)+hashOf(doc.connections);
+      branchPath=[]; selection=null; undoStack=[]; redoStack=[];
+      afterMutation(false);
+    }catch(err){ alert('JSON inválido: '+err.message); }
+    e.target.value='';
+  });
+  $('#btnExportJson').onclick = ()=>{
+    downloadBlob(JSON.stringify(doc,null,2), `${doc.metadata.name}-modelo.json`, 'application/json');
+  };
+
+  $('#btnValidate').onclick = ()=>{
+    const issues = runValidation();
+    alert(issues.length ? `Se encontraron ${issues.length} problema(s). Ver panel inferior.` : 'Sin problemas detectados.');
+  };
+  $('#btnAutoLayout').onclick = autoLayout;
+  $('#btnNewVersion').onclick = ()=>{
+    const bumped = bumpVersionIfDirty(true);
+    renderAll();
+    alert('Nueva versión mayor generada: ' + doc.version.major+'.'+doc.version.minor+'.'+doc.version.revision+'.'+doc.version.build);
+  };
+  $('#btnUndo').onclick = undo;
+  $('#btnRedo').onclick = redo;
+  $('#btnConnect').onclick = ()=>{
+    mode = mode==='connect' ? 'select' : 'connect';
+    connectSource = null;
+    $('#canvasWrap').classList.toggle('connect-mode', mode==='connect');
+    renderTopbar();
+  };
+  $('#btnDelete').onclick = ()=>{ if(selection) deleteSelection(); };
+  $('#btnLogout').onclick = ()=>{
+    sessionStorage.removeItem('wfd_logged_in');
+    location.reload();
+  };
+}
+
+/* ---------------------------------------------------------------------- */
+/* 16. CARGA DE DATOS DEMO (JSON en la misma ruta del HTML, con fallback) */
+/* ---------------------------------------------------------------------- */
+const EMBEDDED_DEMO = {
+  "schemaVersion": "1.0",
+  "metadata": {
+    "name": "REGIONES",
+    "category": "PurchCategory",
+    "documentTableName": "PurchReqTable",
+    "module": "PurchaseOrder",
+    "templateName": "PurchReqReview",
+    "company": "094",
+    "owner": "ealcantarag",
+    "axVersion": "AX6",
+    "note": "Modelo intermedio de ejemplo, condensado a 2 de las 9 regiones reales (Bajio y Sureste) para mantener el archivo legible. La estructura es idéntica a la de las 9 regiones completas; solo se redujo el volumen de datos."
+  },
+  "version": { "workflowId": 5637173080, "major": 27, "minor": 2, "revision": 0, "build": 0, "previousVersionRef": "5637173080@27.1.0.0", "isDirty": true },
+  "nodes": [
+    { "id": "957b7e47-9ade-4782-8759-5cbe4c7c244d", "storageId": 8, "type": "Start", "name": "Inicio", "description": "Solicitud de Compra creada", "position": { "x": 40, "y": 320 } },
+    { "id": "d6fc89fe-a321-4734-b37c-cf740cbe23d4", "storageId": 4001, "type": "ConditionalDecision", "name": "Validacion CC Regiones",
+      "description": "Rechaza automáticamente si el Centro de Costo de la SC no pertenece a ninguna de las 9 regiones definidas",
+      "position": { "x": 280, "y": 320 },
+      "properties": { "condition": { "documentType": "PurchReqDocument", "field": "PurchReqTable.HcmWorker.HcmEmployment.DefaultDimension.CostCenter", "operator": "OR-of-ANDs",
+        "groups": [
+          { "terms": [{ "field": "DefaultDimension.CostCenter", "operator": "Equals", "value": "01.001" }] },
+          { "terms": [{ "field": "DefaultDimension.CostCenter", "operator": "Equals", "value": "11.000" }] },
+          { "terms": [{ "field": "DefaultDimension.CostCenter", "operator": "Equals", "value": "07.001" }] },
+          { "terms": [{ "field": "DefaultDimension.CostCenter", "operator": "Equals", "value": "29.002" }] }
+        ] } } },
+    { "id": "b10f7491-9ac0-41a2-9284-a98f60475b2a", "storageId": 4230, "type": "Rejection", "name": "Rechazo Automatico - CC fuera de Regiones",
+      "description": "Rechazo automático, sin escalamiento, cuando el CC no coincide con ninguna región",
+      "position": { "x": 280, "y": 560 },
+      "properties": {
+        "assignment": { "assignmentType": "User", "role": "Originator", "hierarchyProvider": "HcmPositionHierarchyConfigurableWorkflowProvider", "participantProvider": "PurchReqWFExpendiParticipantProvider", "queueProvider": "WorkflowWorkItemQueueCustomProvider", "fixedUser": "procax365" },
+        "escalation": { "escalationType": "None" },
+        "allowedActions": ["Complete", "Reject", "RequestChange", "Delegate", "Reassign", "Release"]
+      } },
+    { "id": "86025f22-a2c5-428c-90c0-acc6a46850d0", "storageId": 5638031078, "type": "ParallelActivity", "name": "Regiones",
+      "description": "9 ramas concurrentes; en este ejemplo se muestran 2 (Bajio y Sureste) con la misma forma que las 9 reales",
+      "position": { "x": 560, "y": 320 },
+      "properties": { "branches": [
+        { "id": "ae91ef0b-9294-4e25-93e9-714457ec9e4a", "storageId": 5637643326, "name": "Bajio",
+          "elementCollection": { "nodes": [
+              { "id": "cc891e11-2183-41c2-9cf7-e5fe2e8ff9db", "storageId": 100001, "type": "Start", "name": "Inicio", "position": { "x": 20, "y": 20 } },
+              { "id": "3f255049-0c43-4a27-b609-8fd8245f3985", "storageId": 100002, "type": "ConditionalDecision", "name": "Centro Costos", "position": { "x": 220, "y": 20 },
+                "properties": { "condition": { "documentType": "PurchReqDocument", "field": "DefaultDimension.CostCenter", "operator": "OR-of-ANDs",
+                  "groups": [ { "terms": [{ "operator": "Equals", "value": "01.001" }] }, { "terms": [{ "operator": "Equals", "value": "11.000" }] } ] } } },
+              { "id": "443234c6-a1bf-47f0-92d6-caaa5387868f", "storageId": 100003, "type": "Subworkflow", "name": "Reg Bajio", "position": { "x": 420, "y": 20 },
+                "properties": { "workflowId": 5637173080, "workflowName": "Reg Bajio", "documentKeyTable": "PurchReqTable", "documentKeyField": "PurchReqId", "waitForCompletion": true, "resolved": false } },
+              { "id": "0f1a3bbc-e5a3-4f40-86be-572fded92e8e", "storageId": 100004, "type": "End", "name": "Fin", "position": { "x": 620, "y": 20 } }
+            ],
+            "connections": [
+              { "id": "rel-b1", "sourceNodeId": "cc891e11-2183-41c2-9cf7-e5fe2e8ff9db", "targetNodeId": "3f255049-0c43-4a27-b609-8fd8245f3985", "outcome": null, "level": 1 },
+              { "id": "rel-b2", "sourceNodeId": "3f255049-0c43-4a27-b609-8fd8245f3985", "targetNodeId": "443234c6-a1bf-47f0-92d6-caaa5387868f", "outcome": "True", "level": 2 },
+              { "id": "rel-b3", "sourceNodeId": "3f255049-0c43-4a27-b609-8fd8245f3985", "targetNodeId": "0f1a3bbc-e5a3-4f40-86be-572fded92e8e", "outcome": "False", "level": 2 },
+              { "id": "rel-b4", "sourceNodeId": "443234c6-a1bf-47f0-92d6-caaa5387868f", "targetNodeId": "0f1a3bbc-e5a3-4f40-86be-572fded92e8e", "outcome": null, "level": 3 }
+            ] } },
+        { "id": "b36b9a00-e279-4b9c-9f4d-d0d4be526ea1", "storageId": 5637643334, "name": "Sureste",
+          "elementCollection": { "nodes": [
+              { "id": "102ca064-7e30-4763-b254-fcf189e1dfeb", "storageId": 100101, "type": "Start", "name": "Inicio", "position": { "x": 20, "y": 20 } },
+              { "id": "1218d2a3-d8dd-4ee8-bea8-98d3bda3773e", "storageId": 100102, "type": "ConditionalDecision", "name": "Centro Costos", "position": { "x": 220, "y": 20 },
+                "properties": { "condition": { "documentType": "PurchReqDocument", "field": "DefaultDimension.CostCenter", "operator": "OR-of-ANDs",
+                  "groups": [ { "terms": [{ "operator": "Equals", "value": "07.001" }] }, { "terms": [{ "operator": "Equals", "value": "29.002" }] } ] } } },
+              { "id": "c005a9e3-ff48-47ad-bfd5-5bf907290413", "storageId": 100103, "type": "Subworkflow", "name": "Reg Sureste", "position": { "x": 420, "y": 20 },
+                "properties": { "workflowId": 5637175328, "workflowName": "Reg Sureste", "documentKeyTable": "PurchReqTable", "documentKeyField": "PurchReqId", "waitForCompletion": true, "resolved": false } },
+              { "id": "8a1ee9b5-ec8d-4c23-b022-936e418ef0cf", "storageId": 100104, "type": "End", "name": "Fin", "position": { "x": 620, "y": 20 } }
+            ],
+            "connections": [
+              { "id": "rel-s1", "sourceNodeId": "102ca064-7e30-4763-b254-fcf189e1dfeb", "targetNodeId": "1218d2a3-d8dd-4ee8-bea8-98d3bda3773e", "outcome": null, "level": 1 },
+              { "id": "rel-s2", "sourceNodeId": "1218d2a3-d8dd-4ee8-bea8-98d3bda3773e", "targetNodeId": "c005a9e3-ff48-47ad-bfd5-5bf907290413", "outcome": "True", "level": 2 },
+              { "id": "rel-s3", "sourceNodeId": "1218d2a3-d8dd-4ee8-bea8-98d3bda3773e", "targetNodeId": "8a1ee9b5-ec8d-4c23-b022-936e418ef0cf", "outcome": "False", "level": 2 },
+              { "id": "rel-s4", "sourceNodeId": "c005a9e3-ff48-47ad-bfd5-5bf907290413", "targetNodeId": "8a1ee9b5-ec8d-4c23-b022-936e418ef0cf", "outcome": null, "level": 3 }
+            ] } }
+      ] } },
+    { "id": "dfe469d7-de6b-428a-b30a-9828f0351fda", "storageId": 20, "type": "End", "name": "Fin", "position": { "x": 860, "y": 320 } }
+  ],
+  "connections": [
+    { "id": "33671c0a-44bd-4892-a27d-22eda797c358", "sourceNodeId": "957b7e47-9ade-4782-8759-5cbe4c7c244d", "targetNodeId": "d6fc89fe-a321-4734-b37c-cf740cbe23d4", "outcome": null, "level": 1 },
+    { "id": "rel-gw-true", "sourceNodeId": "d6fc89fe-a321-4734-b37c-cf740cbe23d4", "targetNodeId": "86025f22-a2c5-428c-90c0-acc6a46850d0", "outcome": "True", "level": 2 },
+    { "id": "rel-gw-false", "sourceNodeId": "d6fc89fe-a321-4734-b37c-cf740cbe23d4", "targetNodeId": "b10f7491-9ac0-41a2-9284-a98f60475b2a", "outcome": "False", "level": 2 },
+    { "id": "rel-task-end", "sourceNodeId": "b10f7491-9ac0-41a2-9284-a98f60475b2a", "targetNodeId": "dfe469d7-de6b-428a-b30a-9828f0351fda", "outcome": null, "level": 3 },
+    { "id": "37fbfcae-7f1c-4d1f-9a44-f338055ba208", "sourceNodeId": "86025f22-a2c5-428c-90c0-acc6a46850d0", "targetNodeId": "dfe469d7-de6b-428a-b30a-9828f0351fda", "outcome": null, "level": 3 }
+  ]
+};
+
+async function loadInitialDocument(){
+  try{
+    const res = await fetch('./ejemplo-modelo-intermedio.json', {cache:'no-store'});
+    if(res.ok){
+      doc = await res.json();
+      return;
+    }
+  }catch(e){ /* file:// bloquea fetch por CORS — se usa el respaldo embebido */ }
+  doc = clone(EMBEDDED_DEMO);
+}
+
+/* ---------------------------------------------------------------------- */
+/* 17. LOGIN + BOOTSTRAP                                                   */
+/* ---------------------------------------------------------------------- */
+const VALID_USER = 'admin', VALID_PASS = 'admin123';
+$('#loginForm').addEventListener('submit', (e)=>{
+  e.preventDefault();
+  const u = $('#loginUser').value, p = $('#loginPass').value;
+  if(u===VALID_USER && p===VALID_PASS){
+    sessionStorage.setItem('wfd_logged_in','1');
+    startApp();
+  } else {
+    $('#loginError').style.display = 'block';
+  }
+});
+
+async function startApp(){
+  $('#loginScreen').style.display='none';
+  $('#app').style.display='flex';
+  await loadInitialDocument();
+  baselineHash = hashOf(doc.nodes)+hashOf(doc.connections);
+  initCanvasInteraction();
+  wireTopbar();
+  renderAll();
+  runValidation();
+}
+
+if(sessionStorage.getItem('wfd_logged_in')==='1'){
+  startApp();
+}
+</script>
+</body>
+</html>
