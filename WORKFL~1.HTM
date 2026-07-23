@@ -274,7 +274,25 @@ const MANUAL_HTML = `
 <p>Para nodos de <b>Approval</b> o <b>Manual Decision</b>, al conectar te pedirá escribir el resultado de esa ruta (por ejemplo <code>Approve</code>, <code>Reject</code>, <code>RequestChange</code>) — puedes dejarlo vacío si esa salida no representa un resultado específico.</p>
 
 <h4>3. Editar propiedades de un nodo</h4>
-<p>Haz clic (sin arrastrar) sobre un nodo para seleccionarlo — el panel derecho muestra sus campos según el tipo: nombre/descripción siempre; condición (para Conditional Decision); asignación/aprobador/escalamiento (para Task, Approval, Rejection); referencia de subflujo (para Subworkflow); lista de ramas (para Parallel Activity). Los cambios se guardan al salir del campo (blur) o al cambiar un select.</p>
+<p>Haz clic (sin arrastrar) sobre un nodo para seleccionarlo — el panel derecho muestra sus campos según el tipo: nombre/descripción siempre; condición (para Conditional Decision); asignación/aprobador/escalamiento (para Task y Rejection); pasos de aprobación (para Approval); referencia de subflujo (para Subworkflow); lista de ramas (para Parallel Activity). Los cambios se guardan al salir del campo (blur) o al cambiar un select.</p>
+
+<h4>3.1 Condiciones (Conditional Decision) — campo por término y grupos And/Or</h4>
+<p>La condición se modela igual que en el panel real de D365: es un <b>OR de grupos</b>, y dentro de cada grupo los términos se combinan con <b>AND</b> ("Where X ... And Y ..."). Cada término tiene su propio <b>Campo</b>, <b>Operador</b> (Equals, NotEqual, LessThan, Contains, etc.) y <b>Valor</b> — no todos los términos de un grupo tienen que evaluar el mismo campo.</p>
+<ul style="margin:6px 0 6px 18px;padding:0;">
+  <li><b>"+ término (And)"</b> dentro de una tarjeta de grupo agrega otra condición que debe cumplirse junto con las demás del mismo grupo.</li>
+  <li><b>"+ Agregar grupo (Or)"</b> agrega una alternativa completa — basta con que se cumpla ese grupo para que la condición sea verdadera.</li>
+  <li>El cuadro de <b>"carga masiva"</b> al final sigue disponible para el caso simple: una lista de valores separados por coma sobre el campo por defecto, cada uno se convierte en su propio grupo con un término "Equals".</li>
+  <li>Al importar un XML real, si D365 guardaba el campo evaluado como una referencia compleja (no un simple nombre de campo), se preserva tal cual internamente para no perder información al reexportar, aunque el editor muestre "(campo compuesto — ver XML)".</li>
+</ul>
+
+<h4>3.2 Pasos de aprobación (Approval)</h4>
+<p>Un nodo <b>Approval</b> representa un <code>ApprovalElement</code> real de D365, que admite una <b>cadena de pasos secuenciales</b> (igual que el panel "Pasos de aprobación" del diseñador de Workflow): cada paso tiene su propia asignación (usuario fijo, rol, jerarquía o proveedor de participantes), política de finalización, modo de ejecución y escalamiento.</p>
+<ul style="margin:6px 0 6px 18px;padding:0;">
+  <li><b>"+ Agregar paso de aprobación"</b> añade otro escalón a la cadena (por ejemplo: Gerente → Director → Finanzas).</li>
+  <li>Las flechas <b>↑ / ↓</b> en cada tarjeta reordenan la secuencia; el número de "sequence" se recalcula solo.</li>
+  <li>Una aprobación debe tener al menos un paso — el sistema no deja borrar el último.</li>
+  <li>Al importar, si el XML original traía la tarea como <code>TaskElement</code> pero con las acciones "Complete" y "Reject" habilitadas (patrón típico de aprobaciones hechas con Task genérico), se reconoce igualmente como Approval y se muestra con este mismo editor de pasos.</li>
+</ul>
 
 <h4>4. Ramas paralelas (Parallel Activity)</h4>
 <p>Doble clic sobre un nodo "Parallel Activity" para <b>entrar</b> a su primera rama — el canvas cambia a mostrar solo esa rama, y aparece una barra de pestañas debajo del breadcrumb para saltar entre ramas. Usa el breadcrumb ("🏠 Raíz") arriba a la izquierda para salir. Dentro de una rama puedes agregar/editar/conectar nodos exactamente igual que en el flujo principal — cada rama es su propio mini-diagrama que debe empezar en Start y terminar en End.</p>
@@ -540,6 +558,14 @@ const VALIDATION_RULES = [
       }
     });
   },
+  function approvalMustHaveStep(coll, path, issues){
+    coll.nodes.filter(n=>n.type==='Approval').forEach(n=>{
+      const steps = n.properties && n.properties.steps;
+      if(!steps || !steps.length){
+        issues.push({sev:'Error', nodeId:n.id, path, msg:`Aprobación "${n.name}" no tiene ningún paso de aprobación configurado.`});
+      }
+    });
+  },
   function subworkflowIncomplete(coll, path, issues){
     coll.nodes.filter(n=>n.type==='Subworkflow').forEach(n=>{
       if(!n.properties || !n.properties.workflowId){
@@ -799,8 +825,11 @@ function renderProperties(){
   if(n.type==='ConditionalDecision'){
     renderConditionEditor(body, n);
   }
-  if(n.type==='Task'||n.type==='Approval'||n.type==='Rejection'){
+  if(n.type==='Task'||n.type==='Rejection'){
     renderAssignmentEditor(body, n);
+  }
+  if(n.type==='Approval'){
+    renderApprovalStepsEditor(body, n);
   }
   if(n.type==='Subworkflow'){
     renderSubworkflowEditor(body, n);
@@ -840,25 +869,90 @@ function addSelectField(parent, label, value, options, onChange){
   f.appendChild(sel);
   parent.appendChild(f);
 }
+const COND_OPERATORS = ['Equals','NotEqual','LessThan','LessOrEqual','GreaterThan','GreaterOrEqual','Contains','IsNull','IsNotNull'];
 function renderConditionEditor(parent, n){
   n.properties = n.properties || {};
   const cond = n.properties.condition = n.properties.condition || { documentType:'PurchReqDocument', field:'', operator:'OR-of-ANDs', groups:[] };
-  addTextField(parent, 'Campo evaluado', cond.field, v=>{ pushHistory(); cond.field=v; afterMutation(); });
-  const values = cond.groups.filter(g=>g.terms&&g.terms.length).map(g=>g.terms[0].value).join(', ');
-  parent.appendChild(htmlEl('div', {class:'cc-count'}, `${cond.groups.filter(g=>g.terms&&g.terms.length).length} valores en la condición (OR)`));
-  const f = htmlEl('div', {class:'field'});
-  f.appendChild(htmlEl('label', {}, 'Valores permitidos (separados por coma)'));
-  const ta = htmlEl('textarea', {style:'min-height:90px;'});
-  ta.value = values;
+  cond.groups = cond.groups || [];
+
+  addTextField(parent, 'Tipo de documento', cond.documentType, v=>{ pushHistory(); cond.documentType=v; afterMutation(); });
+  addTextField(parent, 'Campo evaluado (por defecto, si un término no define uno propio)', cond.field, v=>{ pushHistory(); cond.field=v; afterMutation(); });
+
+  const hint = htmlEl('div', {class:'hint', style:'margin:6px 0 10px;'},
+    'Estructura real de D365: la condición completa es un OR de grupos; dentro de cada grupo, los términos se combinan con AND ("Where X ... And Y ..."). Igual que en el panel de condición del diseñador de Workflow.');
+  parent.appendChild(hint);
+
+  const groupsWrap = htmlEl('div', {class:'cond-groups'});
+  parent.appendChild(groupsWrap);
+
+  function renderGroups(){
+    groupsWrap.innerHTML = '';
+    cond.groups.forEach((g, gi)=>{
+      g.terms = g.terms || [];
+      const card = htmlEl('div', {style:'border:1px solid #e3e7ee;border-radius:6px;padding:8px;margin-bottom:8px;background:#fafbfc;'});
+      const head = htmlEl('div', {style:'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;'});
+      head.appendChild(htmlEl('strong', {style:'font-size:12px;color:#555;'}, gi===0 ? 'Grupo OR #1' : `Or — Grupo #${gi+1}`));
+      const delGroup = htmlEl('button', {class:'tb-btn', style:'padding:2px 7px;'}, '🗑 grupo');
+      delGroup.onclick = ()=>{ pushHistory(); cond.groups.splice(gi,1); afterMutation(); renderGroups(); };
+      head.appendChild(delGroup);
+      card.appendChild(head);
+
+      g.terms.forEach((t, ti)=>{
+        const row = htmlEl('div', {class:'field-row', style:'margin-bottom:4px;align-items:center;'});
+        if(ti>0) row.appendChild(htmlEl('span', {style:'font-size:11px;color:#888;width:28px;'}, 'And'));
+        const fieldInp = htmlEl('input', {type:'text', placeholder:'Campo (ej. DefaultDimension.CostCenter)', style:'flex:2;'});
+        fieldInp.value = t.field||'';
+        fieldInp.addEventListener('change', ()=>{ pushHistory(); t.field=fieldInp.value; afterMutation(); });
+        const opSel = htmlEl('select', {style:'flex:1;'});
+        COND_OPERATORS.forEach(o=>{
+          const opt = htmlEl('option', {value:o}, o);
+          if(o===(t.operator||'Equals')) opt.setAttribute('selected','selected');
+          opSel.appendChild(opt);
+        });
+        opSel.addEventListener('change', ()=>{ pushHistory(); t.operator=opSel.value; afterMutation(); });
+        const valInp = htmlEl('input', {type:'text', placeholder:'Valor', style:'flex:1;'});
+        valInp.value = t.value||'';
+        valInp.addEventListener('change', ()=>{ pushHistory(); t.value=valInp.value; afterMutation(); });
+        const delTerm = htmlEl('button', {class:'tb-btn', style:'padding:2px 6px;'}, '✕');
+        delTerm.onclick = ()=>{ pushHistory(); g.terms.splice(ti,1); afterMutation(); renderGroups(); };
+        row.appendChild(fieldInp); row.appendChild(opSel); row.appendChild(valInp); row.appendChild(delTerm);
+        card.appendChild(row);
+      });
+      const addTerm = htmlEl('button', {class:'tb-btn', style:'margin-top:4px;'}, '+ término (And)');
+      addTerm.onclick = ()=>{ pushHistory(); g.terms.push({field:cond.field||'', operator:'Equals', value:''}); afterMutation(); renderGroups(); };
+      card.appendChild(addTerm);
+      groupsWrap.appendChild(card);
+    });
+  }
+  renderGroups();
+
+  const addGroup = htmlEl('button', {class:'tb-btn', style:'width:100%;margin-top:4px;'}, '+ Agregar grupo (Or)');
+  addGroup.onclick = ()=>{
+    pushHistory();
+    cond.groups.push({ terms:[{field:cond.field||'', operator:'Equals', value:''}] });
+    afterMutation();
+    renderGroups();
+  };
+  parent.appendChild(addGroup);
+
+  parent.appendChild(htmlEl('div', {class:'cc-count', style:'margin-top:8px;'},
+    `${cond.groups.filter(g=>g.terms&&g.terms.length).length} grupo(s) — ${cond.groups.reduce((a,g)=>a+(g.terms?g.terms.length:0),0)} término(s) en total.`));
+
+  const bulkTitle = htmlEl('div', {style:'margin-top:14px;padding-top:10px;border-top:1px solid #eef1f5;font-size:12px;color:#666;'},
+    'Atajo — carga masiva de valores de un solo campo (crea un grupo con un término "Equals" por cada valor):');
+  parent.appendChild(bulkTitle);
+  const ta = htmlEl('textarea', {style:'min-height:70px;'});
+  ta.placeholder = '01.001, 11.000, 07.001, ...';
   ta.addEventListener('change', ()=>{
+    if(!ta.value.trim()) return;
     pushHistory();
     const list = ta.value.split(',').map(s=>s.trim()).filter(Boolean);
-    cond.groups = list.map(v=>({terms:[{field:cond.field, operator:'Equals', value:v}]}));
+    list.forEach(v=> cond.groups.push({terms:[{field:cond.field||'', operator:'Equals', value:v}]}));
+    ta.value = '';
     afterMutation();
+    renderGroups();
   });
-  f.appendChild(ta);
-  f.appendChild(htmlEl('div', {class:'hint'}, 'Se traduce a una condición OR (cualquiera de estos valores) sobre el campo indicado — igual al patrón real de D365 (AndElementCollection de comparaciones Equals).'));
-  parent.appendChild(f);
+  parent.appendChild(ta);
 }
 function renderAssignmentEditor(parent, n){
   n.properties = n.properties || {};
@@ -870,6 +964,80 @@ function renderAssignmentEditor(parent, n){
   addTextField(parent, 'Proveedor de participante', a.participantProvider, v=>{ pushHistory(); a.participantProvider=v; afterMutation(); });
   const esc = n.properties.escalation = n.properties.escalation || { escalationType:'None' };
   addSelectField(parent, 'Escalamiento', esc.escalationType, ['None','Complete','Reassign'], v=>{ pushHistory(); esc.escalationType=v; afterMutation(); });
+}
+function defaultApprovalStep(seq){
+  return { id:uuid(), name:`Paso ${seq}`, sequence:seq, completionPolicy:'Single', execute:'Always',
+    assignment:{assignmentType:'User', role:'Originator', hierarchyProvider:'', participantProvider:'', queueProvider:'', fixedUser:''},
+    escalation:{escalationType:'None'} };
+}
+// ApprovalElement en D365 soporta una cadena de pasos de aprobación secuenciales (StepElement[]),
+// cada uno con su propia asignación/jerarquía/escalamiento — igual que el panel "Pasos de aprobación"
+// del diseñador real. Este editor reemplaza al de asignación única que usan Task/Rejection.
+function renderApprovalStepsEditor(parent, n){
+  n.properties = n.properties || {};
+  n.properties.steps = (n.properties.steps && n.properties.steps.length) ? n.properties.steps : [defaultApprovalStep(1)];
+
+  parent.appendChild(htmlEl('div', {class:'cc-count'},
+    `${n.properties.steps.length} paso(s) de aprobación secuencial(es). Se exportan como <ApprovalElement>/<steps>/<StepElement> múltiples.`));
+
+  const list = htmlEl('div', {id:'approvalStepsList'});
+  parent.appendChild(list);
+
+  function renderList(){
+    list.innerHTML = '';
+    n.properties.steps.forEach((step, idx)=>{
+      const card = htmlEl('div', {style:'border:1px solid #e3e7ee;border-radius:6px;padding:8px;margin-bottom:8px;background:#fafbfc;'});
+      const head = htmlEl('div', {style:'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;'});
+      head.appendChild(htmlEl('strong', {style:'font-size:12px;color:#555;'}, `Paso ${idx+1} de ${n.properties.steps.length}`));
+      const btns = htmlEl('div', {});
+      if(idx>0){
+        const up = htmlEl('button', {class:'tb-btn', style:'padding:2px 6px;'}, '↑');
+        up.onclick = ()=>{ pushHistory(); const [s]=n.properties.steps.splice(idx,1); n.properties.steps.splice(idx-1,0,s); n.properties.steps.forEach((s2,i)=>s2.sequence=i+1); afterMutation(); renderList(); };
+        btns.appendChild(up);
+      }
+      if(idx<n.properties.steps.length-1){
+        const down = htmlEl('button', {class:'tb-btn', style:'padding:2px 6px;'}, '↓');
+        down.onclick = ()=>{ pushHistory(); const [s]=n.properties.steps.splice(idx,1); n.properties.steps.splice(idx+1,0,s); n.properties.steps.forEach((s2,i)=>s2.sequence=i+1); afterMutation(); renderList(); };
+        btns.appendChild(down);
+      }
+      const del = htmlEl('button', {class:'tb-btn', style:'padding:2px 6px;'}, '🗑');
+      del.onclick = ()=>{
+        if(n.properties.steps.length<=1){ alert('Una aprobación debe tener al menos un paso.'); return; }
+        pushHistory(); n.properties.steps.splice(idx,1); n.properties.steps.forEach((s2,i)=>s2.sequence=i+1); afterMutation(); renderList();
+      };
+      btns.appendChild(del);
+      head.appendChild(btns);
+      card.appendChild(head);
+
+      const nameInp = htmlEl('input', {type:'text'}); nameInp.value = step.name||'';
+      nameInp.addEventListener('change', ()=>{ pushHistory(); step.name=nameInp.value; afterMutation(); });
+      card.appendChild(htmlEl('label', {style:'font-size:11px;color:#777;'}, 'Nombre del paso'));
+      card.appendChild(nameInp);
+
+      const a = step.assignment = step.assignment || {assignmentType:'User', role:'Originator'};
+      addSelectField(card, 'Tipo de asignación', a.assignmentType, ['User','Role','ParticipantProvider','Hierarchy'], v=>{ pushHistory(); a.assignmentType=v; afterMutation(); });
+      addTextField(card, 'Rol', a.role, v=>{ pushHistory(); a.role=v; afterMutation(); });
+      addTextField(card, 'Usuario fijo', a.fixedUser, v=>{ pushHistory(); a.fixedUser=v; afterMutation(); });
+      addTextField(card, 'Proveedor de jerarquía', a.hierarchyProvider, v=>{ pushHistory(); a.hierarchyProvider=v; afterMutation(); });
+      addTextField(card, 'Proveedor de participante', a.participantProvider, v=>{ pushHistory(); a.participantProvider=v; afterMutation(); });
+      addSelectField(card, 'Política de finalización', step.completionPolicy||'Single', ['Single','All'], v=>{ pushHistory(); step.completionPolicy=v; afterMutation(); });
+      addSelectField(card, 'Ejecutar', step.execute||'Always', ['Always','IfComplete'], v=>{ pushHistory(); step.execute=v; afterMutation(); });
+      const esc = step.escalation = step.escalation || {escalationType:'None'};
+      addSelectField(card, 'Escalamiento', esc.escalationType, ['None','Complete','Reassign'], v=>{ pushHistory(); esc.escalationType=v; afterMutation(); });
+
+      list.appendChild(card);
+    });
+  }
+  renderList();
+
+  const addBtn = htmlEl('button', {class:'tb-btn', style:'width:100%;margin-top:4px;'}, '+ Agregar paso de aprobación');
+  addBtn.onclick = ()=>{
+    pushHistory();
+    n.properties.steps.push(defaultApprovalStep(n.properties.steps.length+1));
+    afterMutation();
+    renderList();
+  };
+  parent.appendChild(addBtn);
 }
 function renderSubworkflowEditor(parent, n){
   n.properties = n.properties || {};
@@ -1148,6 +1316,36 @@ function xsiType(elx){
   const t = elx.getAttributeNS(NS.XSI,'type') || elx.getAttribute('i:type') || '';
   return t.split(':').pop();
 }
+// Un ApprovalElement (y también un TaskElement que se comporte como aprobación) puede
+// traer varios <StepElement> dentro de <steps> — cadena de aprobación secuencial, igual
+// que en el diseñador real de D365. Se parsean todos, no solo el primero.
+function parseStepsCollection(stepsEl){
+  const stepEls = gca(stepsEl, 'StepElement');
+  return stepEls.map((step, i)=>{
+    const assignmentEl = gc(step,'assignment');
+    const hierarchyEl = assignmentEl && gc(assignmentEl,'hierarchy');
+    const participantEl = assignmentEl && gc(assignmentEl,'participant');
+    const queueEl = assignmentEl && gc(assignmentEl,'queue');
+    const userEl = assignmentEl && gc(assignmentEl,'user');
+    const escalationEl = gc(step,'escalation');
+    return {
+      id: txt(gc(step,'id')) || uuid(),
+      name: txt(gc(step,'name')) || `Paso ${i+1}`,
+      sequence: Number(txt(gc(step,'sequence'))) || (i+1),
+      completionPolicy: txt(gc(step,'completionPolicy')) || 'Single',
+      execute: txt(gc(step,'execute')) || 'Always',
+      assignment: {
+        assignmentType: txt(gc(assignmentEl,'assignmentType'))||'User',
+        role: txt(gc(assignmentEl,'role'))||'',
+        hierarchyProvider: txt(gc(hierarchyEl,'providerName')),
+        participantProvider: txt(gc(participantEl,'providerName')),
+        queueProvider: txt(gc(queueEl,'providerName')),
+        fixedUser: txt(gc(userEl,'user')),
+      },
+      escalation: { escalationType: txt(gc(escalationEl,'escalationType'))||'None' },
+    };
+  });
+}
 
 function decodeXmlFile(buffer){
   const bytes = new Uint8Array(buffer);
@@ -1187,21 +1385,37 @@ function parseElementCollection(elementsEl, relationshipsEl){
       const condEl = gc(val,'condition');
       const groups = [];
       const em = condEl && gc(condEl,'expressionModel');
+      const projection = em && gc(em,'projection');
+      const documentName = txt(gc(projection,'documentName'));
       const rootElx = em && gc(em,'rootElement');
       const andColl = rootElx && gc(rootElx,'AndElementCollection');
       if(andColl){
         gca(andColl,'ExpressionAndElement').forEach(exAnd=>{
           const ec = gc(exAnd,'ElementCollection');
           const terms = [];
+          // Cada ExpressionDesignElement dentro de un mismo ElementCollection es un término
+          // unido por AND (patrón real D365: "Where X ... And Y ..."). El propio
+          // ElementCollection puede a su vez anidar otro AndElementCollection/OrElementCollection
+          // para condiciones más profundas ("And either" en el diseñador) — se preserva de forma
+          // recursiva y cualquier nivel no reconocido se guarda en _rawXml para no perder datos.
           gca(ec,'ExpressionDesignElement').forEach(ede=>{
             const sv = gc(ede,'StringValue');
-            if(sv) terms.push({ operator:'Equals', value: txt(sv) });
+            const lhs = gc(ede,'lhsExpressionField');
+            const opEl = gc(ede,'StringOperator');
+            const field = lhs ? (txt(lhs) || (Array.from(lhs.children).length ? '(campo compuesto — ver XML)' : '')) : '';
+            terms.push({
+              field: field,
+              operator: txt(opEl) || 'Equals',
+              value: sv ? txt(sv) : '',
+              _lhsRaw: lhs ? new XMLSerializer().serializeToString(lhs) : null,
+            });
           });
           if(terms.length) groups.push({terms});
         });
       }
+      const primaryField = (groups.find(g=>g.terms.some(t=>t.field))||{}).terms?.find(t=>t.field)?.field || '';
       node = { id, storageId, type:'ConditionalDecision', name: name||'Decisión', description:'', position:{x:260,y:autoY},
-        properties: { condition: { documentType:'', field:'', operator:'OR-of-ANDs', groups } } };
+        properties: { condition: { documentType: documentName, field: primaryField, operator:'OR-of-ANDs', groups } } };
     } else if(type==='ParallelElement'){
       const branchesEl = gc(val,'branches');
       const branches = gca(branchesEl,'ParallelBranchElement').map(b=>{
@@ -1244,19 +1458,36 @@ function parseElementCollection(elementsEl, relationshipsEl){
       const isReject = /rechaz|reject/i.test(name) && !actions.includes('Complete');
       const isApproval = actions.includes('Complete') && actions.includes('Reject');
       const nodeType = isReject ? 'Rejection' : isApproval ? 'Approval' : 'Task';
-      node = { id, storageId, type:nodeType, name: name||'Tarea', description:'', position:{x:300,y:autoY},
-        properties: {
-          assignment: {
-            assignmentType: txt(gc(assignmentEl,'assignmentType'))||'User',
-            role: txt(gc(assignmentEl,'role'))||'',
-            hierarchyProvider: txt(gc(hierarchyEl,'providerName')),
-            participantProvider: txt(gc(participantEl,'providerName')),
-            queueProvider: txt(gc(queueEl,'providerName')),
-            fixedUser: txt(gc(userEl,'user')),
-          },
-          escalation: { escalationType: txt(gc(escalationEl,'escalationType'))||'None' },
-          allowedActions: actions,
-        }};
+      if(nodeType==='Approval'){
+        // Aunque el xsi:type original sea TaskElement, si se comporta como aprobación
+        // (Complete+Reject habilitados) lo tratamos igual que un ApprovalElement real
+        // para poder usar el mismo editor de pasos múltiples.
+        node = { id, storageId, type:'Approval', name: name||'Aprobación', description:'', position:{x:300,y:autoY},
+          properties: { steps: parseStepsCollection(steps), allowedActions: actions } };
+      } else {
+        node = { id, storageId, type:nodeType, name: name||'Tarea', description:'', position:{x:300,y:autoY},
+          properties: {
+            assignment: {
+              assignmentType: txt(gc(assignmentEl,'assignmentType'))||'User',
+              role: txt(gc(assignmentEl,'role'))||'',
+              hierarchyProvider: txt(gc(hierarchyEl,'providerName')),
+              participantProvider: txt(gc(participantEl,'providerName')),
+              queueProvider: txt(gc(queueEl,'providerName')),
+              fixedUser: txt(gc(userEl,'user')),
+            },
+            escalation: { escalationType: txt(gc(escalationEl,'escalationType'))||'None' },
+            allowedActions: actions,
+          }};
+      }
+    } else if(type==='ApprovalElement'){
+      const steps = gc(val,'steps');
+      const allowedEl = gc(val,'allowedActions');
+      const actions = gca(allowedEl,'ActionCollectionProperty').map(a=>{
+        const act = gc(a,'action');
+        return { action: txt(gc(act,'action')), allowed: txt(gc(act,'allowed'))==='true' };
+      }).filter(a=>a.allowed).map(a=>a.action);
+      node = { id, storageId, type:'Approval', name: name||'Aprobación', description:'', position:{x:300,y:autoY},
+        properties: { steps: parseStepsCollection(steps), allowedActions: actions } };
     } else {
       node = { id: id||uuid(), storageId, type:'Unsupported', name: name||type||'Nodo no soportado', description:`xsi:type original: ${type}`, position:{x:200,y:autoY}, properties:{}, raw:true };
     }
@@ -1355,16 +1586,21 @@ function exportToXml(){
 
   function buildCondition(cond){
     const groups = (cond && cond.groups || []).filter(g=>g.terms&&g.terms.length);
+    function termXml(t){
+      const lhs = t._lhsRaw ? t._lhsRaw : (t.field ? `<d14p1:lhsExpressionField>${esc(t.field)}</d14p1:lhsExpressionField>` : `<d14p1:lhsExpressionField i:nil="true"/>`);
+      return `<d14p1:ExpressionDesignElement z:Id="${nextZid()}" i:type="d14p1:ExpressionLiteralStringElement">`
+        + lhs
+        + `<d14p1:StringOperator>${esc(t.operator||'Equals')}</d14p1:StringOperator>`
+        + `<d14p1:StringValue z:Id="${nextZid()}">${esc(t.value)}</d14p1:StringValue>`
+        + `</d14p1:ExpressionDesignElement>`;
+    }
+    // Grupo "ancla" vacío al inicio: mismo patrón observado en exports reales de D365
+    // (AndElementCollection siempre trae un ExpressionAndElement/ElementCollection vacío como primer ítem).
     const andItems = [`<d14p1:ExpressionAndElement z:Id="${nextZid()}" xmlns:d14p1="http://schemas.datacontract.org/2004/07/Microsoft.Dynamics.AX.Framework.Expression.Model"><d14p1:ElementCollection z:Id="${nextZid()}" z:Size="0"/></d14p1:ExpressionAndElement>`]
       .concat(groups.map(g=>{
-        const v = g.terms[0].value;
+        const termsXml = g.terms.map(termXml).join('');
         return `<d14p1:ExpressionAndElement z:Id="${nextZid()}" xmlns:d14p1="http://schemas.datacontract.org/2004/07/Microsoft.Dynamics.AX.Framework.Expression.Model">`
-          + `<d14p1:ElementCollection z:Id="${nextZid()}" z:Size="1">`
-          + `<d14p1:ExpressionDesignElement z:Id="${nextZid()}" i:type="d14p1:ExpressionLiteralStringElement">`
-          + `<d14p1:lhsExpressionField i:nil="true"/>`
-          + `<d14p1:StringOperator>Equals</d14p1:StringOperator>`
-          + `<d14p1:StringValue z:Id="${nextZid()}">${esc(v)}</d14p1:StringValue>`
-          + `</d14p1:ExpressionDesignElement></d14p1:ElementCollection></d14p1:ExpressionAndElement>`;
+          + `<d14p1:ElementCollection z:Id="${nextZid()}" z:Size="${g.terms.length}">${termsXml}</d14p1:ElementCollection></d14p1:ExpressionAndElement>`;
       }));
     return `<condition z:Id="${nextZid()}">`
       + `<category i:nil="true"/><context i:nil="true"/><id>${uuid()}</id><name i:nil="true"/><storageId>0</storageId><subCategory i:nil="true"/>`
@@ -1376,10 +1612,25 @@ function exportToXml(){
       + `</condition>`;
   }
 
+  function buildStepXml(step){
+    const a = step.assignment || {};
+    const esc_ = esc;
+    return `<StepElement><id>${step.id||uuid()}</id><name>${esc_(step.name||'WFStep')}</name>`
+      + `<assignment><assignmentType>${esc_(a.assignmentType||'User')}</assignmentType>`
+      + `<hierarchy><providerName>${esc_(a.hierarchyProvider||'')}</providerName><tokenName>Originator</tokenName></hierarchy>`
+      + `<participant><providerName>${esc_(a.participantProvider||'')}</providerName></participant>`
+      + `<queue><providerName>${esc_(a.queueProvider||'')}</providerName></queue>`
+      + `<role>${esc_(a.role||'Originator')}</role>`
+      + `<user><user>${esc_(a.fixedUser||'')}</user></user></assignment>`
+      + `<completionPolicy>${esc_(step.completionPolicy||'Single')}</completionPolicy><execute>${esc_(step.execute||'Always')}</execute><sequence>${step.sequence||1}</sequence>`
+      + `<escalation><escalationType>${esc_(step.escalation && step.escalation.escalationType || 'None')}</escalationType></escalation>`
+      + `</StepElement>`;
+  }
+
   function buildTask(n){
     const a = n.properties.assignment || {};
     const esc_ = esc;
-    const actions = (n.properties.allowedActions && n.properties.allowedActions.length) ? n.properties.allowedActions : (n.type==='Approval' ? ['Complete','Reject','RequestChange'] : n.type==='Rejection' ? ['Complete','Reject'] : ['Complete']);
+    const actions = (n.properties.allowedActions && n.properties.allowedActions.length) ? n.properties.allowedActions : (n.type==='Rejection' ? ['Complete','Reject'] : ['Complete']);
     const actionsXml = actions.map(act=>`<ActionCollectionProperty><action><action>${esc_(act)}</action><allowed>true</allowed><enabled>true</enabled><isOutcome>true</isOutcome></action></ActionCollectionProperty>`).join('');
     return `<category i:nil="true"/><context i:nil="true"/><id>${n.id}</id><name>${esc_(n.name)}</name><storageId>${n.storageId}</storageId><subCategory i:nil="true"/>`
       + `<steps><StepElement><id>${uuid()}</id><name>WFStep</name>`
@@ -1393,6 +1644,18 @@ function exportToXml(){
       + `<allowedActions>${actionsXml}</allowedActions>`
       + `<elementName>WFTask</elementName><enableActionsInWorkList>true</enableActionsInWorkList>`
       + `<escalation><escalationType>${esc_(n.properties.escalation && n.properties.escalation.escalationType || 'None')}</escalationType></escalation>`;
+  }
+
+  function buildApproval(n){
+    const esc_ = esc;
+    const steps = (n.properties.steps && n.properties.steps.length) ? n.properties.steps : [{ id:uuid(), name:'WFStep', sequence:1, completionPolicy:'Single', execute:'Always', assignment:{assignmentType:'User', role:'Originator'}, escalation:{escalationType:'None'} }];
+    const stepsXml = steps.map(buildStepXml).join('');
+    const actions = (n.properties.allowedActions && n.properties.allowedActions.length) ? n.properties.allowedActions : ['Complete','Reject','RequestChange','Delegate','Reassign'];
+    const actionsXml = actions.map(act=>`<ActionCollectionProperty><action><action>${esc_(act)}</action><allowed>true</allowed><enabled>true</enabled><isOutcome>true</isOutcome></action></ActionCollectionProperty>`).join('');
+    return `<category i:nil="true"/><context i:nil="true"/><id>${n.id}</id><name>${esc_(n.name)}</name><storageId>${n.storageId}</storageId><subCategory i:nil="true"/>`
+      + `<steps z:Size="${steps.length}">${stepsXml}</steps>`
+      + `<allowedActions>${actionsXml}</allowedActions>`
+      + `<elementName>WFApproval</elementName><enableActionsInWorkList>true</enableActionsInWorkList>`;
   }
 
   function buildNode(n){
@@ -1415,9 +1678,14 @@ function exportToXml(){
         + `<evaluationTrue><linkId>${n._trueLinkId||''}</linkId><linkRecId>${n._trueLinkRec||0}</linkRecId><outcome>EvaluationTrue</outcome></evaluationTrue>`
         + `</Value></KeyValueOfguidDesignElementEpM4OCP0>`;
     }
-    if(type==='Task'||type==='Approval'||type==='Rejection'){
+    if(type==='Task'||type==='Rejection'){
       return `<KeyValueOfguidDesignElementEpM4OCP0><Key>${n.id}</Key><Value z:Id="${nextZid()}" i:type="d6p1:TaskElement" xmlns:d6p1="${NS.WF}">`
         + buildTask(n)
+        + `</Value></KeyValueOfguidDesignElementEpM4OCP0>`;
+    }
+    if(type==='Approval'){
+      return `<KeyValueOfguidDesignElementEpM4OCP0><Key>${n.id}</Key><Value z:Id="${nextZid()}" i:type="d6p1:ApprovalElement" xmlns:d6p1="${NS.WF}">`
+        + buildApproval(n)
         + `</Value></KeyValueOfguidDesignElementEpM4OCP0>`;
     }
     if(type==='Subworkflow'){
