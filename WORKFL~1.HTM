@@ -902,7 +902,13 @@ function renderConditionEditor(parent, n){
         if(ti>0) row.appendChild(htmlEl('span', {style:'font-size:11px;color:#888;width:28px;'}, 'And'));
         const fieldInp = htmlEl('input', {type:'text', placeholder:'Campo (ej. DefaultDimension.CostCenter)', style:'flex:2;'});
         fieldInp.value = t.field||'';
-        fieldInp.addEventListener('change', ()=>{ pushHistory(); t.field=fieldInp.value; afterMutation(); });
+        if(t._fieldMeta) fieldInp.title = 'Resuelto desde el XML importado (referencia z:Ref a un Field real). Editar este texto reemplaza la referencia por un campo simple al exportar.';
+        fieldInp.addEventListener('change', ()=>{
+          pushHistory();
+          t.field=fieldInp.value;
+          t._fieldMeta = null; // el usuario tomó control manual del campo: ya no reutilizamos la referencia original
+          afterMutation();
+        });
         const opSel = htmlEl('select', {style:'flex:1;'});
         COND_OPERATORS.forEach(o=>{
           const opt = htmlEl('option', {value:o}, o);
@@ -1316,6 +1322,51 @@ function xsiType(elx){
   const t = elx.getAttributeNS(NS.XSI,'type') || elx.getAttribute('i:type') || '';
   return t.split(':').pop();
 }
+function zAttr(elx, name){
+  // z:Id / z:Ref viven en el namespace de Serialization (NS.SER); algunos parsers exponen
+  // el atributo con prefijo literal "z:Id" en vez de resolver el namespace — se cubren ambos casos.
+  return elx.getAttributeNS(NS.SER, name) || elx.getAttribute('z:'+name) || '';
+}
+// El XML real de D365 NO guarda el nombre del campo evaluado como texto plano dentro de
+// <lhsExpressionField> — ese elemento casi siempre aparece "nil" con un z:Ref que apunta al
+// verdadero objeto Field, definido antes en <condition>/<expressionModel>/<projection>/
+// <rootDatasources>...<fields>. Este índice permite resolver esa referencia por z:Id dentro
+// del alcance de una sola condición (confirmado sobre el XML real de REGIONES: p.ej.
+// <lhsExpressionField z:Ref="97" i:nil="true"/> apunta al Field cuyo z:Id="97" tiene
+// <displayName>Empleo.DefaultDimension.CostCenter</displayName>).
+function buildIdIndex(rootEl){
+  const idx = new Map();
+  function walk(el){
+    const id = zAttr(el,'Id');
+    if(id) idx.set(id, el);
+    Array.from(el.children||[]).forEach(walk);
+  }
+  if(rootEl) walk(rootEl);
+  return idx;
+}
+function resolveFieldRef(lhsEl, idIndex){
+  if(!lhsEl) return { text:'', meta:null };
+  const ref = zAttr(lhsEl,'Ref');
+  if(!ref) return { text: Array.from(lhsEl.children).length ? '(campo compuesto — ver XML)' : '', meta:null };
+  const fieldValueEl = idIndex.get(ref);
+  if(!fieldValueEl) return { text:'(referencia de campo sin resolver: z:Ref='+ref+')', meta:null };
+  const displayName = txt(gc(fieldValueEl,'displayName'));
+  // Estructura real (confirmada sobre el XML de REGIONES):
+  // KeyValueOfstringField { Key=<fieldKey>, Value=<fieldValueEl> } dentro de
+  // <fields> dentro del Datasource "hoja" que trae <xpath>/<tableName>/<displayName>.
+  const kvField = fieldValueEl.parentNode;                 // KeyValueOfstringFieldyei7hSOt
+  const fieldsEl = kvField && kvField.parentNode;           // <fields>
+  const datasourceEl = fieldsEl && fieldsEl.parentNode;     // Datasource Value (hoja)
+  const fieldKey = kvField ? txt(gc(kvField,'Key')) : '';
+  const xpath = datasourceEl ? txt(gc(datasourceEl,'xpath')) : '';
+  const dsDisplayName = datasourceEl ? txt(gc(datasourceEl,'displayName')) : '';
+  const extendedDataType = txt(gc(fieldValueEl,'extededDataType'));
+  const fieldType = txt(gc(fieldValueEl,'type')) || 'String';
+  const fullPath = (xpath && fieldKey) ? (xpath.replace(/\//g,'.') + '.' + fieldKey) : '';
+  const text = fullPath || displayName || (fieldKey||'(campo compuesto — ver XML)');
+  const meta = (xpath && fieldKey) ? { xpath, fieldKey, extendedDataType, fieldType, displayName, dsDisplayName } : null;
+  return { text, meta };
+}
 // Un ApprovalElement (y también un TaskElement que se comporte como aprobación) puede
 // traer varios <StepElement> dentro de <steps> — cadena de aprobación secuencial, igual
 // que en el diseñador real de D365. Se parsean todos, no solo el primero.
@@ -1389,6 +1440,11 @@ function parseElementCollection(elementsEl, relationshipsEl){
       const documentName = txt(gc(projection,'documentName'));
       const rootElx = em && gc(em,'rootElement');
       const andColl = rootElx && gc(rootElx,'AndElementCollection');
+      // El campo evaluado NO se guarda como texto en <lhsExpressionField> (casi siempre
+      // aparece "nil" con un z:Ref) — el objeto Field real vive antes, dentro de
+      // <projection>/<rootDatasources>. Se indexa todo <condition> por z:Id una sola vez
+      // para poder resolver esas referencias (ver resolveFieldRef).
+      const idIndex = buildIdIndex(condEl);
       if(andColl){
         gca(andColl,'ExpressionAndElement').forEach(exAnd=>{
           const ec = gc(exAnd,'ElementCollection');
@@ -1402,12 +1458,12 @@ function parseElementCollection(elementsEl, relationshipsEl){
             const sv = gc(ede,'StringValue');
             const lhs = gc(ede,'lhsExpressionField');
             const opEl = gc(ede,'StringOperator');
-            const field = lhs ? (txt(lhs) || (Array.from(lhs.children).length ? '(campo compuesto — ver XML)' : '')) : '';
+            const { text: field, meta: fieldMeta } = resolveFieldRef(lhs, idIndex);
             terms.push({
               field: field,
               operator: txt(opEl) || 'Equals',
               value: sv ? txt(sv) : '',
-              _lhsRaw: lhs ? new XMLSerializer().serializeToString(lhs) : null,
+              _fieldMeta: fieldMeta,
             });
           });
           if(terms.length) groups.push({terms});
@@ -1584,10 +1640,95 @@ function exportToXml(){
   function nilTag(tag){ return `<${tag} i:nil="true"/>`; }
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
+  // Reconstruye <projection>/<rootDatasources> a partir de los xpath de los campos realmente
+  // usados en la condición, y devuelve el XML + un mapa (xpath|fieldKey -> z:Id asignado al
+  // Field) para que los términos puedan referenciarlo con <lhsExpressionField z:Ref="..."/>,
+  // igual que en los exports reales de D365 (ver hallazgo sobre REGIONES: cada término solo
+  // tiene z:Ref al objeto Field definido antes, dentro de projection/rootDatasources/fields).
+  function buildProjectionTree(documentType, fieldMetas){
+    const fieldZidMap = new Map();
+    if(!fieldMetas.length){
+      return { xml: `<projection><documentName>${esc(documentType||'')}</documentName><enumerations/><rootDatasources/></projection>`, fieldZidMap };
+    }
+    // Árbol: nombre de segmento -> { children:Map, fields:Map(fieldKey->meta) }
+    const root = new Map();
+    fieldMetas.forEach(meta=>{
+      const segs = meta.xpath.split('/').filter(Boolean);
+      let level = root;
+      let node = null;
+      segs.forEach(seg=>{
+        if(!level.has(seg)) level.set(seg, { children:new Map(), fields:new Map() });
+        node = level.get(seg);
+        level = node.children;
+      });
+      if(node) node.fields.set(meta.fieldKey, meta);
+    });
+    function serializeDatasourceValue(node, segName, pathParts){
+      // pathParts: segmentos acumulados desde la raíz hasta este nivel (incluido) — se usa
+      // para reconstruir <xpath> igual que en el archivo real (p.ej. "PurchReqTable/HcmWorker/
+      // HcmEmployment"), que es justo lo que resolveFieldRef necesita para reconstruir el campo
+      // completo al reimportar. Sin este dato, el import posterior solo podría recuperar el
+      // displayName corto y no el path completo.
+      const childKeys = Array.from(node.children.keys());
+      const kvItems = childKeys.map(k=>{
+        const child = node.children.get(k);
+        return `<d4p1:KeyValueOfstringDatasourceyei7hSOt><d4p1:Key z:Id="${nextZid()}">${esc(k)}</d4p1:Key><d4p1:Value z:Id="${nextZid()}">${serializeDatasourceValue(child, k, pathParts.concat(k))}</d4p1:Value></d4p1:KeyValueOfstringDatasourceyei7hSOt>`;
+      }).join('');
+      const fieldKeys = Array.from(node.fields.keys());
+      const fieldItems = fieldKeys.map(fk=>{
+        const meta = node.fields.get(fk);
+        const fieldZid = nextZid();
+        fieldZidMap.set(meta.xpath+'|'+fk, fieldZid);
+        return `<d4p1:KeyValueOfstringFieldyei7hSOt><d4p1:Key z:Id="${nextZid()}">${esc(fk)}</d4p1:Key><d4p1:Value z:Id="${fieldZid}">`
+          + `<d14p1:category>Field</d14p1:category><d14p1:displayName>${esc(meta.displayName||(segName+'.'+fk))}</d14p1:displayName>`
+          + `<d14p1:extededDataType>${esc(meta.extendedDataType||'')}</d14p1:extededDataType><d14p1:hasRelations>false</d14p1:hasRelations>`
+          + `<d14p1:isCurrency>false</d14p1:isCurrency><d14p1:isInHierarchy>false</d14p1:isInHierarchy><d14p1:isSurrogate>false</d14p1:isSurrogate>`
+          + `<d14p1:name i:nil="true"/><d14p1:parent i:nil="true"/><d14p1:type>${esc(meta.fieldType||'String')}</d14p1:type>`
+          + `</d4p1:Value></d4p1:KeyValueOfstringFieldyei7hSOt>`;
+      }).join('');
+      return `<d14p1:cardinality>None</d14p1:cardinality>`
+        + `<d14p1:datasources z:Size="${childKeys.length}">${kvItems}</d14p1:datasources>`
+        + `<d14p1:displayName>${esc(node.fields.size && node.fields.values().next().value.dsDisplayName || segName)}</d14p1:displayName>`
+        + `<d14p1:documentName>${esc(documentType||'')}</d14p1:documentName>`
+        + `<d14p1:fields z:Size="${fieldKeys.length}">${fieldItems}</d14p1:fields>`
+        + `<d14p1:name i:nil="true"/><d14p1:parent i:nil="true"/>`
+        + `<d14p1:path i:nil="true"/><d14p1:tableName>${esc(segName)}</d14p1:tableName><d14p1:type>Query</d14p1:type>`
+        + `<d14p1:xpath>${esc(pathParts.join('/'))}</d14p1:xpath>`;
+    }
+    const rootKeys = Array.from(root.keys());
+    const rootItems = rootKeys.map(k=>{
+      const node = root.get(k);
+      return `<d4p1:KeyValueOfstringDatasourceyei7hSOt><d4p1:Key z:Id="${nextZid()}">${esc(k)}</d4p1:Key><d4p1:Value z:Id="${nextZid()}">${serializeDatasourceValue(node, k, [k])}</d4p1:Value></d4p1:KeyValueOfstringDatasourceyei7hSOt>`;
+    }).join('');
+    const xml = `<projection><documentName>${esc(documentType||'')}</documentName><enumerations/>`
+      + `<rootDatasources z:Size="${rootKeys.length}">${rootItems}</rootDatasources></projection>`;
+    return { xml, fieldZidMap };
+  }
+
   function buildCondition(cond){
     const groups = (cond && cond.groups || []).filter(g=>g.terms&&g.terms.length);
+    // Deduplicar los campos con referencia estructurada real (importados desde XML y no editados
+    // manualmente en el panel) — cada uno se reconstruye una sola vez en rootDatasources aunque
+    // varios términos lo usen, igual que en el archivo original.
+    const uniqueFieldMetas = [];
+    const seen = new Set();
+    groups.forEach(g=>g.terms.forEach(t=>{
+      if(t._fieldMeta && t._fieldMeta.xpath && t._fieldMeta.fieldKey){
+        const key = t._fieldMeta.xpath+'|'+t._fieldMeta.fieldKey;
+        if(!seen.has(key)){ seen.add(key); uniqueFieldMetas.push(t._fieldMeta); }
+      }
+    }));
+    const { xml: projectionXml, fieldZidMap } = buildProjectionTree(cond.documentType, uniqueFieldMetas);
+
     function termXml(t){
-      const lhs = t._lhsRaw ? t._lhsRaw : (t.field ? `<d14p1:lhsExpressionField>${esc(t.field)}</d14p1:lhsExpressionField>` : `<d14p1:lhsExpressionField i:nil="true"/>`);
+      let lhs;
+      if(t._fieldMeta && t._fieldMeta.xpath && t._fieldMeta.fieldKey && fieldZidMap.has(t._fieldMeta.xpath+'|'+t._fieldMeta.fieldKey)){
+        lhs = `<d14p1:lhsExpressionField z:Ref="${fieldZidMap.get(t._fieldMeta.xpath+'|'+t._fieldMeta.fieldKey)}" i:nil="true"/>`;
+      } else if(t.field){
+        lhs = `<d14p1:lhsExpressionField>${esc(t.field)}</d14p1:lhsExpressionField>`;
+      } else {
+        lhs = `<d14p1:lhsExpressionField i:nil="true"/>`;
+      }
       return `<d14p1:ExpressionDesignElement z:Id="${nextZid()}" i:type="d14p1:ExpressionLiteralStringElement">`
         + lhs
         + `<d14p1:StringOperator>${esc(t.operator||'Equals')}</d14p1:StringOperator>`
@@ -1606,7 +1747,7 @@ function exportToXml(){
       + `<category i:nil="true"/><context i:nil="true"/><id>${uuid()}</id><name i:nil="true"/><storageId>0</storageId><subCategory i:nil="true"/>`
       + `<propertyName>Microsoft.Dynamics.AX.Framework.Workflow.ExpressionProperty</propertyName>`
       + `<expressionModel z:Id="${nextZid()}"><expressionId>${uuid()}</expressionId><expressionRecId>0</expressionRecId><expressionTablePrimaryKey>0</expressionTablePrimaryKey>`
-      + `<projection><documentName>${esc(cond.documentType||'')}</documentName><enumerations/><rootDatasources/></projection>`
+      + projectionXml
       + `<rootElement><AndElementCollection z:Id="${nextZid()}" z:Size="${andItems.length}">${andItems.join('')}</AndElementCollection></rootElement>`
       + `<queryClassName i:nil="true"/></expressionModel>`
       + `</condition>`;
